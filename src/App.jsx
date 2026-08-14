@@ -2836,14 +2836,16 @@ function PlayerCard({ player, stats, onCourt, halfSeconds, stintSeconds, armed, 
           <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: onCourt ? T.bg : T.text }}>{player.name}</div>
           {/* Dos relojes: el acumulado de ESTA parte (arranca de 0 en cada
               parte) y el tiempo que lleva seguido en pista desde la última
-              vez que entró (a cero en cuanto se sienta en el banquillo). */}
-          <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
-            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.3, color: labelColor }}>Parte</span>
-            <span className="oswald" style={{ fontSize: 15, fontWeight: 700, color: valueColor }}>{fmtMin(halfSeconds)}</span>
+              vez que entró (a cero en cuanto se sienta en el banquillo). El
+              de "en pista" es el que más se mira en directo, así que va más
+              grande que el de la parte. */}
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 1 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: labelColor }}>Parte</span>
+            <span className="oswald" style={{ fontSize: 19, fontWeight: 700, lineHeight: 1.1, color: valueColor }}>{fmtMin(halfSeconds)}</span>
           </div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
-            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.3, color: labelColor }}>En pista</span>
-            <span className="oswald" style={{ fontSize: 15, fontWeight: 700, color: valueColor }}>{onCourt ? fmtMin(stintSeconds) : "—"}</span>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: labelColor }}>En pista</span>
+            <span className="oswald" style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.1, color: valueColor }}>{onCourt ? fmtMin(stintSeconds) : "—"}</span>
           </div>
         </div>
         <div className="oswald" style={{ fontSize: 34, fontWeight: 700, color: onCourt ? T.bg : T.red, lineHeight: 1, flexShrink: 0 }}>{player.number}</div>
