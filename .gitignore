@@ -5,6 +5,9 @@ dist-ssr/
 .DS_Store
 .vite/
 
+# Ajustes locales de la maquina, no del proyecto
+.claude/settings.local.json
+
 # Iconos generados por `npm run icons` — se regeneran solos al compilar en
 # GitHub, pero se dejan versionados para poder sustituirlos por el escudo real.
 # (Si prefieres no versionarlos, descomenta las lineas siguientes.)
