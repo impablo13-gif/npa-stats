@@ -8,6 +8,19 @@ dist-ssr/
 # Ajustes locales de la maquina, no del proyecto
 .claude/settings.local.json
 
+# Ayudante de un solo uso para iniciar sesion en GitHub desde este equipo
+INICIAR-SESION-GITHUB.bat
+
+# Descargas e instaladores que acaben en esta carpeta
+*.exe
+*.msi
+*.dmg
+
+# Copias de seguridad y exportaciones: contienen los datos del club (plantillas,
+# fotos, historial) y no tienen por que acabar en un repositorio publico.
+npa-stats_copia_*.json
+*.xlsx
+
 # Iconos generados por `npm run icons` — se regeneran solos al compilar en
 # GitHub, pero se dejan versionados para poder sustituirlos por el escudo real.
 # (Si prefieres no versionarlos, descomenta las lineas siguientes.)
