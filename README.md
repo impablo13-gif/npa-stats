@@ -20,9 +20,36 @@ ningún servidor.
 3. A partir de ahí se abre desde el icono, a pantalla completa y sin barra del
    navegador. **Ya no hace falta wifi**: en el pabellón funciona igual.
 
-> Los datos viven en la tablet donde se usa la app. Si se instala en dos
-> dispositivos, cada uno tiene su propio historial. Para llevarse los datos,
-> exporta a Excel desde *Historial*.
+> Los datos viven en la tablet donde se usa la app: si se instala en dos
+> dispositivos, cada uno tiene su propio historial. Para pasarlos de uno a otro,
+> usa **Copia de seguridad** (más abajo).
+
+---
+
+## Compartir los datos entre dispositivos
+
+No hay servidor, así que los datos no viajan solos. Para moverlos hay un
+archivo de copia, en *Inicio → Copia de seguridad*:
+
+- **Crear copia**: genera un archivo con todo (equipos, plantillas, fotos,
+  partidos y entrenos). En iPad se abre directamente la hoja de compartir, así
+  que se manda por AirDrop, WhatsApp o correo. En el resto, se descarga.
+- **Importar copia**: se elige el archivo recibido y, **antes de aplicar nada**,
+  se ve qué contiene (equipos, jugadores, partidos y de cuándo es). Después hay
+  que elegir cómo entra:
+  - *Añadir estos equipos* — para un segundo entrenador: trae los equipos de la
+    copia sin tocar los que ya tuviera. Si un equipo ya estaba, su plantilla
+    pasa a ser la de la copia y sus partidos se suman a los que hubiera.
+  - *Reemplazar todo* — para una tablet nueva o de sustitución: deja el
+    dispositivo igual que el que hizo la copia. No se puede deshacer.
+
+Conviene crear una copia de vez en cuando: es lo único que protege los datos si
+la tablet se rompe o se pierde. El partido en curso no entra en la copia, solo
+lo ya finalizado.
+
+Es una foto del momento, no una sincronización: si dos personas apuntan cosas a
+la vez en tablets distintas, cada una tiene lo suyo y la copia no las mezcla
+sola.
 
 ---
 
@@ -112,6 +139,7 @@ pantalla de inicio de la app («Hay una versión nueva…») y se aplica al puls
 | --- | --- |
 | `src/App.jsx` | Toda la aplicación: partido, entrenamiento, plantilla, historial. |
 | `src/storage.js` | Guardado local en IndexedDB (equipos, plantillas, historial, partido en curso). |
+| `src/backup.js` | Copias de seguridad: crear el archivo, validarlo y restaurarlo. |
 | `src/index.css` | Estilos globales y fuentes empaquetadas (no se descargan de internet). |
 | `vite.config.js` | Compilación y configuración de la PWA (manifiesto y service worker). |
 | `tools/make-icons.mjs` | Genera los iconos sin depender de librerías de imagen. |

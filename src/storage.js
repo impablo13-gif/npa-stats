@@ -119,6 +119,53 @@ export const storage = {
   },
 };
 
+/* Vuelca todo el contenido de una vez, para las copias de seguridad.
+   Las claves y los valores se leen en la MISMA transaccion: si se leyeran por
+   separado, un guardado automatico entre medias podria descuadrarlos. */
+storage.all = async function all() {
+  try {
+    const db = await openDb();
+    return await new Promise((resolve, reject) => {
+      const t = db.transaction(STORE, "readonly");
+      const s = t.objectStore(STORE);
+      const kq = s.getAllKeys();
+      const vq = s.getAll();
+      t.oncomplete = () => {
+        const out = {};
+        (kq.result || []).forEach((k, i) => { out[k] = (vq.result || [])[i]; });
+        resolve(out);
+      };
+      t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error);
+    });
+  } catch (e) {
+    return Object.fromEntries(memFallback());
+  }
+};
+
+/* Escribe muchas claves en una sola transaccion: al restaurar una copia, o
+   entra todo o no entra nada, nunca a medias. */
+storage.setMany = async function setMany(obj) {
+  try {
+    await tx("readwrite", (s) => { Object.entries(obj).forEach(([k, v]) => s.put(v, k)); });
+    return true;
+  } catch (e) {
+    const map = memFallback();
+    Object.entries(obj).forEach(([k, v]) => map.set(k, v));
+    return false;
+  }
+};
+
+storage.clear = async function clear() {
+  try {
+    await tx("readwrite", (s) => { s.clear(); });
+    return true;
+  } catch (e) {
+    memFallback().clear();
+    return false;
+  }
+};
+
 /* Cuanto espacio queda en el dispositivo — util para avisar antes de que una
    plantilla llena de fotos empiece a fallar en mitad de un partido. */
 export async function estimateStorage() {

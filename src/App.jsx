@@ -5,9 +5,10 @@ import {
   Shirt, ChevronRight, Trash2, History, ClipboardList,
   Target, Footprints, Shield, Hand, ArrowLeftRight, AlertTriangle, Camera, BarChart3, Users, Check, ZoomIn,
   Home, FileSpreadsheet, ArrowRight, Trophy, Settings, Star, Dumbbell, CheckCheck, Undo2, Clock3, MapPin,
-  Maximize2, Minimize2, Download, RefreshCw, WifiOff,
+  Maximize2, Minimize2, Download, RefreshCw, WifiOff, Share2, Upload, DatabaseBackup,
 } from "lucide-react";
 import { storage, requestPersistence } from "./storage.js";
+import { buildBackup, summarizeBackup, fmtBytes, backupFileName, shareOrDownload, readBackupFile, applyBackup } from "./backup.js";
 
 /* TOKENS — colores del escudo real del Noia Portus Apostoli FS:
    rojo (la daga/espada), negro (texto y balón) y blanco, sobre un fondo
@@ -677,6 +678,7 @@ export default function App() {
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [cropTarget, setCropTarget] = useState(null); // { kind: 'player'|'teamCrest'|'rivalCrest', id, src }
   const [pendingDrafts, setPendingDrafts] = useState(null); // { match?, training? } sesiones sin cerrar encontradas al abrir
+  const [backupOpen, setBackupOpen] = useState(false);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [updateReady, setUpdateReady] = useState(false);
   const [standalone] = useState(isStandaloneApp);
@@ -1644,6 +1646,7 @@ export default function App() {
             onApplyUpdate={applyUpdate}
             matchInProgress={matchInProgress}
             onResumeMatch={() => setView("partido")}
+            onOpenBackup={() => setBackupOpen(true)}
           />
         )}
 
@@ -1754,6 +1757,16 @@ export default function App() {
         />
       )}
 
+      {backupOpen && (
+        <BackupModal
+          onClose={() => setBackupOpen(false)}
+          showToast={showToast}
+          clockBusy={running || trainingRunning}
+          matchInProgress={matchInProgress}
+          onBeforeExport={() => { commitTime(); commitTrainingTime(); return saveDraftNow(); }}
+        />
+      )}
+
       {pendingDrafts && (
         <DraftRecoveryModal
           drafts={pendingDrafts}
@@ -1848,6 +1861,157 @@ export default function App() {
 }
 
 /* SUBCOMPONENTS ---------------------------------------------------- */
+
+/* Copia de seguridad: pasar los datos a otra tablet o recuperarlos.
+   Importar es destructivo, asi que nunca se aplica nada sin ver antes qué trae
+   la copia y elegir explícitamente cómo entra. */
+function BackupModal({ onClose, showToast, clockBusy, matchInProgress, onBeforeExport }) {
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(null); // copia leída, esperando confirmación
+  const [error, setError] = useState(null);
+  const fileRef = useRef(null);
+
+  const exportar = async () => {
+    setBusy(true); setError(null);
+    try {
+      if (onBeforeExport) await onBeforeExport();
+      const backup = await buildBackup();
+      const resumen = summarizeBackup(backup);
+      if (!resumen.equipos.length) { setError("No hay nada que copiar todavía."); return; }
+      const res = await shareOrDownload(JSON.stringify(backup), backupFileName());
+      if (res === "cancelado") return;
+      showToast(res === "compartido" ? "Copia compartida" : "Copia guardada en Descargas");
+    } catch (e) {
+      setError("No se pudo crear la copia: " + (e && e.message ? e.message : "error desconocido"));
+    } finally { setBusy(false); }
+  };
+
+  const elegirArchivo = async (file) => {
+    if (!file) return;
+    setError(null);
+    try {
+      const backup = await readBackupFile(file);
+      setPending({ backup, resumen: summarizeBackup(backup) });
+    } catch (e) { setError(e.message); }
+  };
+
+  const importar = async (mode) => {
+    if (!pending) return;
+    setBusy(true); setError(null);
+    try {
+      await applyBackup(pending.backup, mode);
+      showToast("Copia importada — recargando…");
+      // Recargar es lo más limpio: la app vuelve a leer todo desde cero y no
+      // queda nada del estado anterior en pantalla.
+      setTimeout(() => window.location.reload(), 600);
+    } catch (e) {
+      setError("No se pudo importar: " + (e && e.message ? e.message : "error desconocido"));
+      setBusy(false);
+    }
+  };
+
+  const fecha = (iso) => { try { return new Date(iso).toLocaleString("es-ES", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }); } catch (e) { return ""; } };
+
+  return (
+    <div style={{ ...overlayStyle, alignItems: "center" }} onClick={busy ? undefined : onClose}>
+      <div style={{ ...modalCard, maxWidth: 480, borderRadius: 16, maxHeight: "86vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()} className="fadein">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <div className="oswald" style={{ fontSize: 18, fontWeight: 600 }}>Copia de seguridad</div>
+          <button onClick={onClose} style={iconBtnSm}><X size={16} /></button>
+        </div>
+        <div style={{ fontSize: 12, color: T.dim, lineHeight: 1.5, marginBottom: 16 }}>
+          Los datos viven solo en esta tablet. Una copia sirve para pasárselos a otra persona
+          y para no perderlos si el dispositivo se rompe.
+        </div>
+
+        {error && (
+          <div style={{ background: "rgba(139,38,53,0.25)", border: `1px solid ${T.negative}`, borderRadius: 10, padding: "10px 12px", fontSize: 12, marginBottom: 12, display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <AlertTriangle size={14} color={T.negative} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {!pending && (
+          <>
+            <div style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 12, padding: 14, marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <Share2 size={15} color={T.red} />
+                <span className="oswald" style={{ fontSize: 15, fontWeight: 600 }}>Crear copia</span>
+              </div>
+              <div style={{ fontSize: 12, color: T.dim, lineHeight: 1.5, marginBottom: 12 }}>
+                Genera un archivo con todo: equipos, plantillas, fotos, partidos y entrenos.
+                {matchInProgress && <><br /><strong style={{ color: T.amber }}>El partido en curso no entra en la copia</strong> — termínalo antes si quieres incluirlo.</>}
+              </div>
+              <button onClick={exportar} disabled={busy} style={{ ...bigBtn, background: T.red, color: "#0A0A0A", opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}>
+                <Share2 size={15} /> {busy ? "Preparando…" : "Crear y compartir copia"}
+              </button>
+            </div>
+
+            <div style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 12, padding: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <Upload size={15} color={T.text} />
+                <span className="oswald" style={{ fontSize: 15, fontWeight: 600 }}>Importar copia</span>
+              </div>
+              <div style={{ fontSize: 12, color: T.dim, lineHeight: 1.5, marginBottom: 12 }}>
+                {clockBusy
+                  ? "Para el reloj antes de importar: al cargar una copia se recarga la app."
+                  : "Elige el archivo que te hayan pasado. Antes de aplicar nada verás qué contiene."}
+              </div>
+              <button onClick={() => fileRef.current && fileRef.current.click()} disabled={busy || clockBusy} style={{ ...ghostBtn, borderColor: clockBusy ? T.line : T.text, opacity: busy || clockBusy ? 0.5 : 1, cursor: busy || clockBusy ? "default" : "pointer" }}>
+                <Upload size={14} /> Elegir archivo de copia
+              </button>
+              <input ref={fileRef} type="file" accept="application/json,.json" style={{ display: "none" }}
+                onChange={(e) => { elegirArchivo(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+            </div>
+          </>
+        )}
+
+        {pending && (
+          <div>
+            <div style={{ background: T.surface2, border: `1.5px solid ${T.red}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
+              <div style={{ fontSize: 10, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                Copia del {fecha(pending.resumen.creada)} · {fmtBytes(pending.resumen.bytes)}
+              </div>
+              <div className="oswald" style={{ fontSize: 16, fontWeight: 600, margin: "6px 0 4px" }}>
+                {pending.resumen.equipos.length} equipo{pending.resumen.equipos.length === 1 ? "" : "s"} · {pending.resumen.jugadores} jugadores
+              </div>
+              <div style={{ fontSize: 12, color: T.dim }}>
+                {pending.resumen.partidos} partido{pending.resumen.partidos === 1 ? "" : "s"} · {pending.resumen.entrenos} entreno{pending.resumen.entrenos === 1 ? "" : "s"}
+              </div>
+              <div style={{ fontSize: 11, color: T.dim, marginTop: 8 }}>
+                {pending.resumen.equipos.map((t) => t.name).join(" · ")}
+              </div>
+            </div>
+
+            <div style={{ fontSize: 12, color: T.text, fontWeight: 600, marginBottom: 8 }}>¿Cómo quieres importarla?</div>
+
+            <button onClick={() => importar("anadir")} disabled={busy} style={{ width: "100%", textAlign: "left", background: T.surface2, border: `1.5px solid ${T.line}`, borderRadius: 12, padding: 14, cursor: busy ? "default" : "pointer", color: T.text, marginBottom: 8 }}>
+              <div className="oswald" style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Añadir estos equipos</div>
+              <div style={{ fontSize: 11, color: T.dim, lineHeight: 1.5 }}>
+                Los equipos que ya tengas y no vengan en la copia no se tocan. Si un equipo ya estaba,
+                su plantilla pasa a ser la de la copia y sus partidos se suman a los que hubiera.
+              </div>
+            </button>
+
+            <button onClick={() => importar("reemplazar")} disabled={busy} style={{ width: "100%", textAlign: "left", background: "rgba(139,38,53,0.18)", border: `1.5px solid ${T.negative}`, borderRadius: 12, padding: 14, cursor: busy ? "default" : "pointer", color: T.text, marginBottom: 12 }}>
+              <div className="oswald" style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                <AlertTriangle size={14} color={T.negative} /> Reemplazar todo
+              </div>
+              <div style={{ fontSize: 11, color: T.dim, lineHeight: 1.5 }}>
+                Borra lo que haya ahora en esta tablet y la deja igual que la que hizo la copia.
+                Es lo que se quiere en un dispositivo nuevo. <strong style={{ color: T.negative }}>No se puede deshacer.</strong>
+              </div>
+            </button>
+
+            <button onClick={() => { setPending(null); setError(null); }} disabled={busy} style={{ ...ghostBtn, width: "100%", justifyContent: "center" }}>
+              Cancelar
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /* Aviso al abrir la app si quedó un partido o un entreno sin cerrar. */
 function DraftRecoveryModal({ drafts, teamName, onResumeMatch, onDiscardMatch, onResumeTraining, onDiscardTraining }) {
@@ -2211,7 +2375,7 @@ function ScoreColumn({ labelNode, crest, score }) {
 function HomeView({
   team, onPickCrest, onReframeCrest, onRemoveCrest, matches, trainings, onNewMatch, onNewTraining,
   onGoRoster, onGoHistory, onExport, playerCount, onOpenTeams, teamCount,
-  canInstall, onInstall, standalone, updateReady, onApplyUpdate, matchInProgress, onResumeMatch,
+  canInstall, onInstall, standalone, updateReady, onApplyUpdate, matchInProgress, onResumeMatch, onOpenBackup,
 }) {
   const wins = matches.filter((m) => m.teamGoals > m.rivalScore).length;
   const draws = matches.filter((m) => m.teamGoals === m.rivalScore).length;
@@ -2263,6 +2427,7 @@ function HomeView({
         <HomeTile icon={Shirt} title="Plantilla" desc={`Gestiona jugadores, fotos y dorsales (${playerCount})`} color={T.text} onClick={onGoRoster} />
         <HomeTile icon={Trophy} title="Historial" desc={hasHistory ? `${matches.length} partido${matches.length === 1 ? "" : "s"} · ${trainings.length} entreno${trainings.length === 1 ? "" : "s"}` : "Todavía no hay partidos ni entrenamientos guardados"} color={T.text} onClick={onGoHistory} />
         <HomeTile icon={FileSpreadsheet} title="Exportar a Excel" desc={hasHistory ? "Descarga todas las estadísticas" : "Disponible cuando haya datos guardados"} color={hasHistory ? T.red : T.dim} onClick={hasHistory ? onExport : undefined} disabled={!hasHistory} />
+        <HomeTile icon={DatabaseBackup} title="Copia de seguridad" desc="Pasa los datos a otra tablet o recupéralos si esta se rompe" color={T.text} onClick={onOpenBackup} />
       </div>
 
       {/* Instalarla en la pantalla de inicio es lo que garantiza que en el
