@@ -77,6 +77,25 @@ function halvesPresent(statsByHalf, goalEvents) {
 
 const halfLabel = (h) => (h <= 2 ? `${h}ª parte` : `Prórroga ${h - 2}`);
 
+// Agrupa las rotaciones (cada entrada y salida de la pista) primero por
+// jugador y dentro de cada jugador por parte — así es como se lee en el
+// resumen y en las exportaciones: la ficha de un jugador, parte a parte.
+function groupRotations(rotations) {
+  const byPlayer = new Map();
+  (rotations || []).forEach((r) => {
+    if (!byPlayer.has(r.playerId)) {
+      byPlayer.set(r.playerId, { playerId: r.playerId, name: r.playerName, number: r.playerNumber, halves: new Map(), total: 0 });
+    }
+    const entry = byPlayer.get(r.playerId);
+    if (!entry.halves.has(r.half)) entry.halves.set(r.half, { list: [], total: 0 });
+    const h = entry.halves.get(r.half);
+    h.list.push(r);
+    h.total += r.durationSeconds;
+    entry.total += r.durationSeconds;
+  });
+  return [...byPlayer.values()].sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0));
+}
+
 function fmtClock(t) { const m = Math.floor(t / 60), s = t % 60; return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`; }
 function fmtMin(t) { const m = Math.floor(t / 60), s = t % 60; return `${m}'${String(s).padStart(2, "0")}"`; }
 function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
@@ -221,6 +240,35 @@ function halfScore(match, half) {
    y entonces estas funciones simplemente no generan las hojas por parte. */
 const halvesOf = (match) => (Array.isArray(match.halves) ? match.halves : []);
 
+// Filas para la hoja de Excel de rotaciones: jugador por jugador, cada
+// entrada/salida de la parte que le corresponde, y el acumulado de esa parte
+// y el total al cierre de cada bloque. Los partidos guardados antes de que
+// existiera este seguimiento no traen `rotations`, y entonces no hay filas.
+function rotationRowsOf(match) {
+  const grouped = groupRotations(match.rotations || []);
+  const rows = [];
+  grouped.forEach((g) => {
+    [...g.halves.entries()].sort((a, b) => a[0] - b[0]).forEach(([half, h]) => {
+      h.list.forEach((r, i) => {
+        rows.push({
+          Dorsal: g.number, Jugador: g.name, Parte: half, "Nº rotación": i + 1,
+          Entra: fmtClock(r.startRemaining), Sale: fmtClock(r.endRemaining),
+          Duración: fmtMin(r.durationSeconds), "Duración (seg)": r.durationSeconds,
+        });
+      });
+      rows.push({
+        Dorsal: g.number, Jugador: g.name, Parte: half, "Nº rotación": `Acumulado ${halfLabel(Number(half))}`,
+        Entra: "", Sale: "", Duración: fmtMin(h.total), "Duración (seg)": h.total,
+      });
+    });
+    rows.push({
+      Dorsal: g.number, Jugador: g.name, Parte: "", "Nº rotación": "Acumulado total",
+      Entra: "", Sale: "", Duración: fmtMin(g.total), "Duración (seg)": g.total,
+    });
+  });
+  return rows;
+}
+
 function exportClubDataToExcel(matches, trainings, teamName) {
   if (!matches.length && !trainings.length) return;
   const wb = XLSX.utils.book_new();
@@ -259,6 +307,9 @@ function exportClubDataToExcel(matches, trainings, teamName) {
 
       const goalRows = goalRowsOf(m);
       if (goalRows.length) addSheet(wb, goalRows, `G ${dateLabel}`, `Goles ${idx + 1}`);
+
+      const rotRows = rotationRowsOf(m);
+      if (rotRows.length) addSheet(wb, rotRows, `R ${dateLabel}`, `Rotaciones ${idx + 1}`);
     });
   }
 
@@ -313,6 +364,9 @@ function exportSingleMatchToExcel(match, teamName) {
 
   const goalRows = goalRowsOf(match);
   if (goalRows.length) addSheet(wb, goalRows, "Goles");
+
+  const rotRows = rotationRowsOf(match);
+  if (rotRows.length) addSheet(wb, rotRows, "Rotaciones");
 
   if ((match.convocados || []).length) {
     addSheet(wb, match.convocados.map((p) => ({ Dorsal: p.number, Jugador: p.name })), "Convocatoria");
@@ -382,6 +436,26 @@ function printMatchReport(match, teamName) {
       </tr>`).join("")}</tbody>
     </table>`;
 
+  const rotGrouped = groupRotations(match.rotations || []);
+  const rotationsHtml = !rotGrouped.length ? "" : sectionTitle("Rotaciones") +
+    rotGrouped.map((g) => {
+      const halvesRotHtml = [...g.halves.entries()].sort((a, b) => a[0] - b[0]).map(([half, h]) => {
+        const linesHtml = h.list.map((r, i) => `<div style="display:flex; justify-content:space-between; font-size:10px; padding:1px 0;">
+            <span>${i + 1}ª rotación: ${fmtClock(r.startRemaining)} → ${fmtClock(r.endRemaining)}</span>
+            <span style="font-weight:600;">${fmtMin(r.durationSeconds)}</span>
+          </div>`).join("");
+        return `<div style="margin-bottom:4px;">
+            <div style="font-size:10px; color:#666; text-transform:uppercase; margin-bottom:1px;">${esc(halfLabel(Number(half)))}</div>
+            ${linesHtml}
+            <div style="font-size:10px; color:#555; margin-top:1px;">Acumulado ${esc(halfLabel(Number(half)))}: <strong>${fmtMin(h.total)}</strong></div>
+          </div>`;
+      }).join("");
+      return `<div style="margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid #ddd;">
+          <div style="font-size:12px; font-weight:700; margin-bottom:4px;">#${esc(g.number)} ${esc(g.name)} — Acumulado total: ${fmtMin(g.total)}</div>
+          ${halvesRotHtml}
+        </div>`;
+    }).join("");
+
   const sc1 = halfScore(match, 1), sc2 = halfScore(match, 2);
 
   const html = `
@@ -399,6 +473,7 @@ function printMatchReport(match, teamName) {
       ${sectionTitle("Total del partido")}
       ${tableFor(match.players)}
       ${goalsHtml}
+      ${rotationsHtml}
     </div>`;
 
   let container = document.getElementById("print-match-report");
@@ -649,6 +724,10 @@ export default function App() {
   // { 1: { jugadorId: stats }, 2: { ... } }. El total del partido se calcula
   // sumando las partes, mas abajo.
   const [statsByHalf, setStatsByHalf] = useState({});
+  // Cada entrada y salida de la pista de cada jugador, ya cerrada: quién,
+  // en qué parte, desde qué marca del reloj hasta cuál. Lo abierto ahora
+  // mismo vive aparte, en `stintsRef` (ver más abajo).
+  const [rotations, setRotations] = useState([]);
   const [running, setRunning] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [half, setHalf] = useState(1);
@@ -737,6 +816,52 @@ export default function App() {
   useEffect(() => { runningRef.current = running; }, [running]);
   useEffect(() => { trainingActiveRef.current = trainingActive; }, [trainingActive]);
   useEffect(() => { trainingRunningRef.current = trainingRunning; }, [trainingRunning]);
+
+  /* ---------------------------------------------------------------- */
+  /* ROTACIONES                                                         */
+  /*                                                                    */
+  /* Cada vez que un jugador entra o sale de la pista se abre o cierra  */
+  /* una "rotación": desde qué marca del reloj hasta cuál estuvo en     */
+  /* pista de un tirón. Se guarda en tiempo restante (el mismo que se   */
+  /* ve en el reloj grande), igual que ya se hace con los goles, para   */
+  /* que quede fijado tal y como se vio en su momento.                  */
+  /* ---------------------------------------------------------------- */
+  const stintsRef = useRef(new Map()); // en pista ahora mismo: id -> { half, startRemaining }
+  const rotationsRef = useRef([]); // espejo síncrono de `rotations`, para leerlo sin esperar al re-render
+
+  const currentRemaining = () => Math.max(0, halfLenRef.current * 60 - secondsRef.current);
+
+  const openStint = (playerId, halfNum) => {
+    stintsRef.current.set(playerId, { half: halfNum, startRemaining: currentRemaining() });
+  };
+
+  // Idempotente a propósito: si ya no hay una rotación abierta para este
+  // jugador, no hace nada — así un reintento (p. ej. al reintentar guardar el
+  // partido tras un fallo) nunca duplica ni corrompe el historial.
+  const closeStint = (playerId) => {
+    const st = stintsRef.current.get(playerId);
+    if (!st) return;
+    stintsRef.current.delete(playerId);
+    const endRemaining = currentRemaining();
+    const durationSeconds = Math.max(0, st.startRemaining - endRemaining);
+    if (durationSeconds <= 0) return; // toque accidental en el mismo segundo: no deja rastro
+    const player = players.find((p) => p.id === playerId);
+    const next = [...rotationsRef.current, {
+      id: `rot-${playerId}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      playerId, playerName: player ? player.name : "?", playerNumber: player ? player.number : "?",
+      half: st.half, startRemaining: st.startRemaining, endRemaining, durationSeconds,
+    }];
+    rotationsRef.current = next;
+    setRotations(next);
+  };
+
+  // Punto de partida limpio: partido nuevo o cambio de media parte. Sustituye
+  // el mapa de rotaciones abiertas por una nueva, una por cada jugador que
+  // empieza en pista.
+  const openStintsForCourt = (ids, halfNum) => {
+    stintsRef.current = new Map();
+    (ids || []).forEach((id) => openStint(id, halfNum));
+  };
 
   // Reparte el tiempo transcurrido desde el último reparto entre el reloj del
   // partido y los jugadores que estaban en pista durante ese intervalo.
@@ -843,6 +968,7 @@ export default function App() {
           v: DRAFT_VERSION, savedAt: new Date().toISOString(),
           seconds, half, halfLength, rivalName, rivalScore, rivalCrest, venue, matchStartTime,
           occFor, occAgainst, onCourt, convocados, goalEvents, statsByHalf,
+          rotations, openStints: [...stintsRef.current.entries()],
         }
       : null,
     training: trainingInProgress
@@ -967,6 +1093,13 @@ export default function App() {
     setOnCourt(startingFive);
     onCourtRef.current = startingFive;
     setStatsByHalf({});
+    // Escrito directo sobre los refs (no vía openStintsForCourt) porque esta
+    // función va envuelta en useCallback con dependencias fijas: los refs son
+    // estables pase lo que pase, una función capturada en un cierre viejo no.
+    const fullRemaining = Math.max(0, halfLenRef.current * 60 - secondsRef.current);
+    stintsRef.current = new Map(startingFive.map((id) => [id, { half: 1, startRemaining: fullRemaining }]));
+    rotationsRef.current = [];
+    setRotations([]);
     setTrainingActive(list.map((p) => p.id));
     const ts = {}; list.forEach((p) => (ts[p.id] = { seconds: 0 }));
     setTrainingStats(ts);
@@ -1088,6 +1221,16 @@ export default function App() {
     setOnCourt(oc);
     onCourtRef.current = oc;
 
+    // Rotaciones ya cerradas, tal cual, y las que seguían abiertas cuando se
+    // guardó el borrador — solo para quien de verdad sigue en pista ahora.
+    const restoredStints = new Map();
+    (d.openStints || []).forEach(([id, st]) => {
+      if (oc.includes(id) && st && typeof st.startRemaining === "number") restoredStints.set(id, st);
+    });
+    stintsRef.current = restoredStints;
+    rotationsRef.current = Array.isArray(d.rotations) ? d.rotations : [];
+    setRotations(rotationsRef.current);
+
     setPendingDrafts((prev) => {
       const rest = prev && prev.training ? { training: prev.training } : null;
       return rest;
@@ -1164,11 +1307,14 @@ export default function App() {
 
   const toggleCourt = (id) => {
     commitTime(); // liquida el tiempo del quinteto anterior antes de cambiarlo
-    setOnCourt((prev) => {
-      if (prev.includes(id)) return prev.filter((x) => x !== id);
-      if (prev.length >= 5) { showToast("Ya hay 5 en pista — saca a alguien primero"); return prev; }
-      return [...prev, id];
-    });
+    if (onCourt.includes(id)) {
+      closeStint(id);
+      setOnCourt((prev) => prev.filter((x) => x !== id));
+      return;
+    }
+    if (onCourt.length >= 5) { showToast("Ya hay 5 en pista — saca a alguien primero"); return; }
+    openStint(id, halfRef.current);
+    setOnCourt((prev) => [...prev, id]);
   };
 
   // Tapping a card: if we're mid-goal-registration waiting for the scorer, this tap picks
@@ -1190,6 +1336,8 @@ export default function App() {
     if (!subPickerFor) return;
     const incoming = subPickerFor;
     commitTime();
+    closeStint(outgoingId);
+    openStint(incoming.id, halfRef.current);
     setOnCourt((prev) => prev.filter((id) => id !== outgoingId).concat(incoming.id));
     showToast(`${incoming.name} entra por sustitución`);
     setSubPickerFor(null);
@@ -1351,8 +1499,10 @@ export default function App() {
     setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setOccFor(0); setOccAgainst(0);
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setStatsByHalf({});
+    rotationsRef.current = []; setRotations([]);
     const startingFive = players.slice(0, 5).map((p) => p.id);
     setOnCourt(startingFive); onCourtRef.current = startingFive;
+    openStintsForCourt(startingFive, 1);
     setLastEvent(null);
     setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null);
     setConvocados(null);
@@ -1369,6 +1519,8 @@ export default function App() {
   const confirmConvocatoria = (selectedIds, mode) => {
     if (mode === "editar") {
       commitTime();
+      const removed = onCourt.filter((id) => !selectedIds.includes(id));
+      removed.forEach((id) => closeStint(id));
       setConvocados(selectedIds);
       setOnCourt((prev) => {
         const kept = prev.filter((id) => selectedIds.includes(id));
@@ -1385,9 +1537,11 @@ export default function App() {
     setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setOccFor(0); setOccAgainst(0);
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setStatsByHalf({});
+    rotationsRef.current = []; setRotations([]);
     setConvocados(selectedIds);
     const startingFive = selectedIds.slice(0, 5);
     setOnCourt(startingFive); onCourtRef.current = startingFive;
+    openStintsForCourt(startingFive, 1);
     setLastEvent(null);
     setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null);
     setConvocatoriaMode(null);
@@ -1396,6 +1550,7 @@ export default function App() {
 
   const finishMatch = async () => {
     commitTime();
+    onCourtRef.current.forEach((id) => closeStint(id)); // cierra las rotaciones que seguían en pista
     autosaveSuspended.current = true;
     const convocadosList = convocados
       ? players.filter((p) => convocados.includes(p.id)).map((p) => ({ id: p.id, name: p.name, number: p.number }))
@@ -1411,6 +1566,7 @@ export default function App() {
       halves: halvesPresent(statsByHalf, goalEvents).map((h) => ({ half: h, players: rowsFrom(statsByHalf[h]) })),
       goalEvents, // additive: full history of who scored, from what phase, with the exact 5 on court at that moment
       convocados: convocadosList, // additive: who was called up for this match
+      rotations: rotationsRef.current, // additive: cada entrada y salida de la pista de cada jugador
     };
     let saved = false;
     try {
@@ -1431,11 +1587,13 @@ export default function App() {
 
   const startNextHalf = () => {
     setClockRunning(false); // liquida el tiempo pendiente en la parte que acaba
+    onCourtRef.current.forEach((id) => closeStint(id)); // cierra la rotación de quien sigue en pista al cambiar de parte
     secondsRef.current = 0;
     setSeconds(0);
     const next = halfRef.current + 1;
     halfRef.current = next; // a partir de aqui todo se anota en la parte nueva
     setHalf(next);
+    onCourtRef.current.forEach((id) => openStint(id, next)); // y le abre una nueva, ya en la parte que empieza
     saveDraftNow();
   };
 
@@ -1678,9 +1836,17 @@ export default function App() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 10 }}>
               {sortedPlayers.filter((p) => !convocados || convocados.includes(p.id)).map((p) => {
                 const isOn = onCourt.includes(p.id);
+                // Acumulado de ESTA parte (arranca de 0 en cada parte) y tiempo
+                // seguido en pista desde la última vez que entró — los dos
+                // derivan de `seconds`, así que se actualizan solos cada
+                // segundo y se congelan solos en cuanto se pausa el reloj.
+                const halfSeconds = (statsByHalf[half] && statsByHalf[half][p.id] && statsByHalf[half][p.id].seconds) || 0;
+                const stint = stintsRef.current.get(p.id);
+                const stintSeconds = isOn && stint && stint.half === half ? Math.max(0, stint.startRemaining - remaining) : 0;
                 return (
                   <PlayerCard
                     key={p.id} player={p} stats={stats[p.id] || emptyStats()} onCourt={isOn}
+                    halfSeconds={halfSeconds} stintSeconds={stintSeconds}
                     armed={!!pendingAction || !!(goalWizard && goalWizard.type === "for" && !goalWizard.authorId)}
                     onTap={() => handlePlayerTap(p)}
                     onOpenStats={() => setStatPlayer(p.id)}
@@ -1789,7 +1955,11 @@ export default function App() {
       )}
 
       {summaryOpen && (
-        <SummaryModal players={sortedPlayers} stats={stats} statsByHalf={statsByHalf} goalEvents={goalEvents} onClose={() => setSummaryOpen(false)} />
+        <SummaryModal
+          players={sortedPlayers} stats={stats} statsByHalf={statsByHalf} goalEvents={goalEvents}
+          rotations={rotations} openStints={[...stintsRef.current.entries()]} currentRemaining={remaining}
+          onClose={() => setSummaryOpen(false)}
+        />
       )}
 
       {teamManagerOpen && (
@@ -2318,11 +2488,75 @@ function SectionHeading({ title, right, accent }) {
   );
 }
 
+/* Cada entrada y salida de la pista, jugador a jugador: la rotación en sí
+   (de qué marca a qué marca), el acumulado de cada parte y el acumulado
+   total. Un jugador por fila, plegado por defecto — con 15-20 jugadores con
+   minutos, mostrarlo todo abierto a la vez sería ilegible. */
+function RotationsSection({ rotations }) {
+  const grouped = groupRotations(rotations);
+  const [openId, setOpenId] = useState(null);
+  if (!grouped.length) return null;
+  return (
+    <div style={{ marginTop: 22 }}>
+      <SectionHeading title="Rotaciones" />
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {grouped.map((g) => {
+          const isOpen = openId === g.playerId;
+          return (
+            <div key={g.playerId} style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 10, overflow: "hidden" }}>
+              <div onClick={() => setOpenId(isOpen ? null : g.playerId)} style={{ padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", gap: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>#{g.number} {g.name}</span>
+                <span className="oswald" style={{ fontSize: 13, fontWeight: 700, color: T.red, flexShrink: 0 }}>{fmtMin(g.total)}</span>
+              </div>
+              {isOpen && (
+                <div style={{ borderTop: `1px solid ${T.line}`, padding: "8px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+                  {[...g.halves.entries()].sort((a, b) => a[0] - b[0]).map(([half, h]) => (
+                    <div key={half}>
+                      <div style={{ fontSize: 10, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{halfLabel(Number(half))}</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        {h.list.map((r, i) => (
+                          <div key={r.id} style={{ fontSize: 11, color: T.text, display: "flex", justifyContent: "space-between", gap: 8 }}>
+                            <span>{i + 1}ª rotación: {fmtClock(r.startRemaining)} → {fmtClock(r.endRemaining)}{r.ongoing ? " · en curso" : ""}</span>
+                            <span style={{ fontWeight: 600, flexShrink: 0 }}>{fmtMin(r.durationSeconds)}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ fontSize: 11, color: T.dim, marginTop: 4 }}>Acumulado {halfLabel(Number(half))}: <strong style={{ color: T.text }}>{fmtMin(h.total)}</strong></div>
+                    </div>
+                  ))}
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.red, borderTop: `1px solid ${T.line}`, paddingTop: 6 }}>
+                    Acumulado total: {fmtMin(g.total)}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* Resumen en tres bloques: 1ª parte, 2ª parte y total del partido. Cada parte
    lleva su propio marcador y sus goles, que es como se lee un partido de
    fútbol sala: casi siempre importa en qué mitad pasó cada cosa. */
-function SummaryModal({ players, stats, statsByHalf, goalEvents, onClose }) {
+function SummaryModal({ players, stats, statsByHalf, goalEvents, rotations, openStints, currentRemaining, onClose }) {
   const halves = halvesPresent(statsByHalf, goalEvents);
+  // A las rotaciones ya cerradas se le suma, como fila "en curso", la de
+  // quien sigue en pista en este momento — así el resumen a mitad de partido
+  // también refleja lo que está pasando ahora mismo, no solo lo cerrado.
+  const liveRotations = [
+    ...(rotations || []),
+    ...(openStints || []).map(([playerId, st]) => {
+      const player = players.find((p) => p.id === playerId);
+      return {
+        id: `ongoing-${playerId}`, playerId,
+        playerName: player ? player.name : "?", playerNumber: player ? player.number : "?",
+        half: st.half, startRemaining: st.startRemaining, endRemaining: currentRemaining,
+        durationSeconds: Math.max(0, st.startRemaining - currentRemaining), ongoing: true,
+      };
+    }),
+  ];
   const scoreOf = (h) => {
     const evs = (goalEvents || []).filter((ev) => Number(ev.half) === h);
     return `${evs.filter((e) => e.type === "for").length}-${evs.filter((e) => e.type !== "for").length}`;
@@ -2357,6 +2591,8 @@ function SummaryModal({ players, stats, statsByHalf, goalEvents, onClose }) {
           <SectionHeading title="Total del partido" right={`${totalFor}-${totalAgainst}`} accent={T.red} />
           <StatsTable players={players} statsMap={stats} />
         </div>
+
+        <RotationsSection rotations={liveRotations} />
       </div>
     </div>
   );
@@ -2579,8 +2815,10 @@ function TabBtn({ active, onClick, icon: Icon, label }) {
   );
 }
 
-function PlayerCard({ player, stats, onCourt, armed, onTap, onOpenStats }) {
+function PlayerCard({ player, stats, onCourt, halfSeconds, stintSeconds, armed, onTap, onOpenStats }) {
   const hasBadges = stats.goals > 0 || stats.yellow > 0 || stats.red > 0;
+  const labelColor = onCourt ? "rgba(10,10,10,0.6)" : T.dim;
+  const valueColor = onCourt ? T.bg : T.dim;
   return (
     <div
       onClick={onTap}
@@ -2596,7 +2834,17 @@ function PlayerCard({ player, stats, onCourt, armed, onTap, onOpenStats }) {
         <Avatar player={player} size={56} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: onCourt ? T.bg : T.text }}>{player.name}</div>
-          <div className="oswald" style={{ fontSize: 18, fontWeight: 700, color: onCourt ? T.bg : T.dim }}>{fmtMin(stats.seconds)}</div>
+          {/* Dos relojes: el acumulado de ESTA parte (arranca de 0 en cada
+              parte) y el tiempo que lleva seguido en pista desde la última
+              vez que entró (a cero en cuanto se sienta en el banquillo). */}
+          <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.3, color: labelColor }}>Parte</span>
+            <span className="oswald" style={{ fontSize: 15, fontWeight: 700, color: valueColor }}>{fmtMin(halfSeconds)}</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.3, color: labelColor }}>En pista</span>
+            <span className="oswald" style={{ fontSize: 15, fontWeight: 700, color: valueColor }}>{onCourt ? fmtMin(stintSeconds) : "—"}</span>
+          </div>
         </div>
         <div className="oswald" style={{ fontSize: 34, fontWeight: 700, color: onCourt ? T.bg : T.red, lineHeight: 1, flexShrink: 0 }}>{player.number}</div>
       </div>
@@ -2900,6 +3148,10 @@ function SavedMatchCard({ match: m, teamName, isOpen, onToggle }) {
               </div>
             </div>
           )}
+
+          {/* Las rotaciones ya agrupan por parte, así que se muestran siempre
+              enteras, sin depender de la pestaña 1ª/2ª/Total de arriba. */}
+          <RotationsSection rotations={m.rotations || []} />
         </div>
       )}
     </div>
