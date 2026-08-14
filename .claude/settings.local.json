@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); node -e \"import\\('lucide-react'\\).then\\(m=>{const want=['Play','Pause','RotateCcw','Plus','Minus','X','Save','Shirt','ChevronRight','Trash2','History','ClipboardList','Target','Footprints','Shield','Hand','ArrowLeftRight','AlertTriangle','Camera','BarChart3','Users','Check','ZoomIn','Home','FileSpreadsheet','ArrowRight','Trophy','Settings','Star','Dumbbell','CheckCheck','Undo2','Clock3','MapPin','Maximize2','Minimize2','Download','WifiOff','RefreshCw'];const missing=want.filter\\(k=>!\\(k in m\\)\\);console.log\\('MISSING:',JSON.stringify\\(missing\\)\\);console.log\\('total exports',Object.keys\\(m\\).length\\)}\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}

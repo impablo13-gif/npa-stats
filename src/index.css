@@ -1,0 +1,100 @@
+/* Las fuentes van empaquetadas con la app (no se piden a Google) — si se
+   cargaran desde internet, en un pabellon sin wifi la app se veria con la
+   tipografia del sistema y descuadrada.
+   Solo el subconjunto latino: cubre de sobra el castellano y evita descargar
+   (y precachear) alfabetos cirilico, griego y vietnamita que no se usan. */
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-500.css";
+@import "@fontsource/inter/latin-600.css";
+@import "@fontsource/inter/latin-700.css";
+@import "@fontsource/oswald/latin-400.css";
+@import "@fontsource/oswald/latin-500.css";
+@import "@fontsource/oswald/latin-600.css";
+@import "@fontsource/oswald/latin-700.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #0a0a0a;
+  color: #f5f5f5;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Evita el rebote elastico al hacer scroll: en pista es facil arrastrar sin
+     querer y ver la pagina "despegarse". */
+  overscroll-behavior: none;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+/* Sin retardo de 300 ms ni zoom por doble toque: la app es puro tap rapido. */
+button,
+.tap-target {
+  touch-action: manipulation;
+}
+
+/* Que un toque rapido no seleccione el nombre del jugador. */
+.tap-target,
+.oswald {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+  /* iOS hace zoom automatico en cualquier campo con letra menor de 16 px. */
+  font-size: 16px;
+}
+
+.oswald {
+  font-family: "Oswald", "Inter", sans-serif;
+}
+
+.fadein {
+  animation: fadeIn 0.18s ease-out;
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.armable {
+  animation: armPulse 1.1s ease-in-out infinite;
+}
+@keyframes armPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(230, 57, 70, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(230, 57, 70, 0);
+  }
+}
+
+.tap-target {
+  -webkit-tap-highlight-color: transparent;
+}
+
+input[type="range"] {
+  height: 4px;
+}
+
+@media print {
+  /* El informe del partido se imprime (o se guarda como PDF) desde la propia app. */
+  #root {
+    display: none !important;
+  }
+}
