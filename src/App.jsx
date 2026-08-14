@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import * as XLSX from "xlsx";
 import {
   Play, Pause, RotateCcw, Plus, Minus, X, Save,
@@ -48,6 +48,33 @@ const emptyStats = () => ({
   seconds: 0, goals: 0, assists: 0, fouls: 0, yellow: 0, red: 0,
   saves: 0, turnovers: 0, recoveries: 0, shotsOn: 0, shotsOff: 0,
 });
+const STAT_KEYS = Object.keys(emptyStats());
+
+// Todo se anota dentro de la parte en la que ocurrio: los totales del partido
+// se calculan sumando las partes, nunca al reves. Asi el desglose por parte y
+// el total no pueden acabar contando cosas distintas.
+function sumHalves(statsByHalf, players) {
+  const out = {};
+  (players || []).forEach((p) => { out[p.id] = emptyStats(); });
+  Object.values(statsByHalf || {}).forEach((halfMap) => {
+    Object.entries(halfMap || {}).forEach(([id, s]) => {
+      if (!out[id]) out[id] = emptyStats();
+      STAT_KEYS.forEach((k) => { out[id][k] += s[k] || 0; });
+    });
+  });
+  return out;
+}
+
+// Las partes a mostrar: siempre 1ª y 2ª (futbol sala), mas las prorrogas que
+// existan si alguna vez se juegan.
+function halvesPresent(statsByHalf, goalEvents) {
+  const set = new Set([1, 2]);
+  Object.keys(statsByHalf || {}).forEach((h) => set.add(Number(h)));
+  (goalEvents || []).forEach((ev) => set.add(Number(ev.half) || 1));
+  return [...set].filter((h) => h > 0).sort((a, b) => a - b);
+}
+
+const halfLabel = (h) => (h <= 2 ? `${h}ª parte` : `Prórroga ${h - 2}`);
 
 function fmtClock(t) { const m = Math.floor(t / 60), s = t % 60; return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`; }
 function fmtMin(t) { const m = Math.floor(t / 60), s = t % 60; return `${m}'${String(s).padStart(2, "0")}"`; }
@@ -125,50 +152,112 @@ async function fileToDataUrl(file) {
 }
 
 /* Excel export ------------------------------------------------------ */
+
+// Excel rechaza los nombres de hoja con : \ / ? * [ ] y los de mas de 31
+// caracteres. El nombre del rival entra tal cual en el nombre de la hoja, asi
+// que un rival como "C.D. Pepe/Juan" tumbaba la exportacion entera.
+function sanitizeSheetName(name) {
+  return String(name || "").replace(/[:\\/?*[\]]/g, "-").replace(/\s+/g, " ").trim().slice(0, 31);
+}
+
+// Dos partidos el mismo dia (torneos, por ejemplo) generaban dos hojas con el
+// mismo nombre y XLSX aborta al encontrar la repetida.
+function uniqueSheetName(wb, desired, fallback) {
+  const base = sanitizeSheetName(desired) || sanitizeSheetName(fallback) || "Hoja";
+  if (!wb.SheetNames.includes(base)) return base;
+  for (let i = 2; i < 100; i++) {
+    const suffix = ` (${i})`;
+    const candidate = base.slice(0, 31 - suffix.length) + suffix;
+    if (!wb.SheetNames.includes(candidate)) return candidate;
+  }
+  return base.slice(0, 27) + Math.floor(Math.random() * 1000);
+}
+
+function addSheet(wb, rows, desiredName, fallback) {
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), uniqueSheetName(wb, desiredName, fallback));
+}
+
+// Los nombres de archivo tampoco admiten \ / : * ? " < > |
+function sanitizeFileName(name) {
+  return String(name || "").replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, "_").replace(/_+/g, "_").replace(/^[_.-]+|[_.-]+$/g, "").slice(0, 60);
+}
+
+const dateLabelOf = (iso) => new Date(iso).toLocaleDateString("es-ES").replace(/\//g, "-");
+
+// Un jugador con solo una asistencia se quedaba fuera de todas las
+// exportaciones, porque las asistencias faltaban en este filtro.
+const hasActivity = (p) =>
+  p.seconds > 0 || p.goals || p.assists || p.fouls || p.yellow || p.red ||
+  p.saves || p.recoveries || p.turnovers || p.shotsOn || p.shotsOff;
+
+const playerRow = (p) => ({
+  Dorsal: p.number, Jugador: p.name, Posición: p.position,
+  Minutos: fmtMin(p.seconds), "Segundos jugados": p.seconds,
+  Goles: p.goals || 0, Asistencias: p.assists || 0,
+  "Tiros a puerta": p.shotsOn || 0, "Tiros fuera": p.shotsOff || 0,
+  Faltas: p.fouls || 0, Amarillas: p.yellow || 0, Rojas: p.red || 0, Paradas: p.saves || 0,
+  Recuperaciones: p.recoveries || 0, Pérdidas: p.turnovers || 0,
+});
+
+const goalRowsOf = (match) => (match.goalEvents || []).map((ev) => ({
+  Parte: ev.half,
+  "Tiempo restante": fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds),
+  Tipo: ev.type === "for" ? "A favor" : "En contra",
+  Autor: ev.authorName || "",
+  Fase: ev.phase,
+  "Jugadores en pista": (ev.onCourt || []).map((p) => `#${p.number} ${p.name}`).join(", "),
+}));
+
+// Marcador de una parte concreta, para poder leer de un vistazo en que mitad
+// se decidio el partido.
+function halfScore(match, half) {
+  const evs = (match.goalEvents || []).filter((ev) => Number(ev.half) === Number(half));
+  return { favor: evs.filter((e) => e.type === "for").length, contra: evs.filter((e) => e.type !== "for").length };
+}
+
+/* Un partido guardado lleva `halves`: el desglose de cada parte por separado.
+   Los partidos guardados antes de existir ese desglose solo tienen el total,
+   y entonces estas funciones simplemente no generan las hojas por parte. */
+const halvesOf = (match) => (Array.isArray(match.halves) ? match.halves : []);
+
 function exportClubDataToExcel(matches, trainings, teamName) {
   if (!matches.length && !trainings.length) return;
   const wb = XLSX.utils.book_new();
 
   if (matches.length) {
-    const summaryRows = matches.map((m) => ({
-      Fecha: new Date(m.date).toLocaleDateString("es-ES"),
-      Rival: m.rivalName,
-      [teamName || "Equipo"]: m.teamGoals,
-      "Goles rival": m.rivalScore,
-      "Ocasiones a favor": m.occFor,
-      "Ocasiones en contra": m.occAgainst,
-      "Duración parte (min)": m.halfLength,
-    }));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), "Resumen partidos");
+    const summaryRows = matches.map((m) => {
+      const h1 = halfScore(m, 1), h2 = halfScore(m, 2);
+      return {
+        Fecha: new Date(m.date).toLocaleDateString("es-ES"),
+        Hora: m.startTime || "",
+        Pabellón: m.venue || "",
+        Rival: m.rivalName,
+        [teamName || "Equipo"]: m.teamGoals,
+        "Goles rival": m.rivalScore,
+        "1ª parte": `${h1.favor}-${h1.contra}`,
+        "2ª parte": `${h2.favor}-${h2.contra}`,
+        "Ocasiones a favor": m.occFor,
+        "Ocasiones en contra": m.occAgainst,
+        "Duración parte (min)": m.halfLength,
+      };
+    });
+    addSheet(wb, summaryRows, "Resumen partidos");
 
     matches.forEach((m, idx) => {
-      const rows = m.players
-        .filter((p) => p.seconds > 0 || p.goals || p.fouls || p.yellow || p.red || p.saves || p.recoveries || p.turnovers || p.shotsOn || p.shotsOff)
-        .map((p) => ({
-          Dorsal: p.number, Jugador: p.name, Posición: p.position,
-          Minutos: fmtMin(p.seconds), "Segundos jugados": p.seconds,
-          Goles: p.goals, Asistencias: p.assists,
-          "Tiros a puerta": p.shotsOn || 0, "Tiros fuera": p.shotsOff || 0,
-          Faltas: p.fouls, Amarillas: p.yellow, Rojas: p.red, Paradas: p.saves,
-          Recuperaciones: p.recoveries, Pérdidas: p.turnovers,
-        }));
-      const dateLabel = new Date(m.date).toLocaleDateString("es-ES").replace(/\//g, "-");
-      let sheetName = `P ${dateLabel}${m.rivalName ? " vs " + m.rivalName : ""}`;
-      sheetName = sheetName.slice(0, 28) || `Partido ${idx + 1}`;
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), sheetName);
+      const dateLabel = dateLabelOf(m.date);
+      const rows = m.players.filter(hasActivity).map(playerRow);
+      addSheet(wb, rows, `P ${dateLabel}${m.rivalName ? " vs " + m.rivalName : ""}`, `Partido ${idx + 1}`);
 
-      const goalRows = (m.goalEvents || []).map((ev) => ({
-        Tipo: ev.type === "for" ? "A favor" : "En contra",
-        Autor: ev.authorName || "",
-        Fase: ev.phase,
-        Parte: ev.half,
-        "Tiempo restante": fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds),
-        "Jugadores en pista": (ev.onCourt || []).map((p) => `#${p.number} ${p.name}`).join(", "),
-      }));
-      if (goalRows.length) {
-        let goalSheetName = `G ${dateLabel}`.slice(0, 28);
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(goalRows), goalSheetName);
-      }
+      // Una sola hoja por partido con las partes apiladas: separarlas en varias
+      // hojas dispararia el numero de pestañas de una temporada entera.
+      const byHalfRows = [];
+      halvesOf(m).forEach((h) => {
+        h.players.filter(hasActivity).forEach((p) => byHalfRows.push({ Parte: h.half, ...playerRow(p) }));
+      });
+      if (byHalfRows.length) addSheet(wb, byHalfRows, `Partes ${dateLabel}`, `Partes ${idx + 1}`);
+
+      const goalRows = goalRowsOf(m);
+      if (goalRows.length) addSheet(wb, goalRows, `G ${dateLabel}`, `Goles ${idx + 1}`);
     });
   }
 
@@ -178,7 +267,7 @@ function exportClubDataToExcel(matches, trainings, teamName) {
       "Duración sesión": fmtMin(t.durationSeconds),
       "Jugadores con actividad": t.players.filter((p) => p.seconds > 0).length,
     }));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(trainingSummaryRows), "Resumen entrenos");
+    addSheet(wb, trainingSummaryRows, "Resumen entrenos");
 
     trainings.forEach((t, idx) => {
       const rows = t.players
@@ -187,17 +276,16 @@ function exportClubDataToExcel(matches, trainings, teamName) {
           Dorsal: p.number, Jugador: p.name, Posición: p.position,
           "Tiempo activo": fmtMin(p.seconds), "Segundos activo": p.seconds,
         }));
-      const dateLabel = new Date(t.date).toLocaleDateString("es-ES").replace(/\//g, "-");
-      let sheetName = `E ${dateLabel}`.slice(0, 28) || `Entreno ${idx + 1}`;
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), sheetName);
+      addSheet(wb, rows, `E ${dateLabelOf(t.date)}`, `Entreno ${idx + 1}`);
     });
   }
 
-  XLSX.writeFile(wb, `${(teamName || "equipo").replace(/\s+/g, "_")}_estadisticas_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  XLSX.writeFile(wb, `${sanitizeFileName(teamName) || "equipo"}_estadisticas_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 function exportSingleMatchToExcel(match, teamName) {
   const wb = XLSX.utils.book_new();
+  const h1 = halfScore(match, 1), h2 = halfScore(match, 2);
   const summary = [{
     Fecha: new Date(match.date).toLocaleDateString("es-ES"),
     Hora: match.startTime || "",
@@ -205,37 +293,33 @@ function exportSingleMatchToExcel(match, teamName) {
     Rival: match.rivalName,
     [teamName || "Equipo"]: match.teamGoals,
     "Goles rival": match.rivalScore,
+    "1ª parte": `${h1.favor}-${h1.contra}`,
+    "2ª parte": `${h2.favor}-${h2.contra}`,
     "Ocasiones a favor": match.occFor,
     "Ocasiones en contra": match.occAgainst,
     "Duración parte (min)": match.halfLength,
   }];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), "Resumen");
+  addSheet(wb, summary, "Resumen");
 
-  const rows = match.players
-    .filter((p) => p.seconds > 0 || p.goals || p.fouls || p.yellow || p.red || p.saves || p.recoveries || p.turnovers || p.shotsOn || p.shotsOff)
-    .map((p) => ({
-      Dorsal: p.number, Jugador: p.name, Posición: p.position,
-      Minutos: fmtMin(p.seconds), "Segundos jugados": p.seconds,
-      Goles: p.goals, Asistencias: p.assists,
-      "Tiros a puerta": p.shotsOn || 0, "Tiros fuera": p.shotsOff || 0,
-      Faltas: p.fouls, Amarillas: p.yellow, Rojas: p.red, Paradas: p.saves,
-      Recuperaciones: p.recoveries, Pérdidas: p.turnovers,
-    }));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Jugadores");
+  addSheet(wb, match.players.filter(hasActivity).map(playerRow), "Total partido");
 
-  const goalRows = (match.goalEvents || []).map((ev) => ({
-    Tipo: ev.type === "for" ? "A favor" : "En contra",
-    Autor: ev.authorName || "",
-    Fase: ev.phase,
-    Parte: ev.half,
-    "Tiempo restante": fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds),
-    "Jugadores en pista": (ev.onCourt || []).map((p) => `#${p.number} ${p.name}`).join(", "),
-  }));
-  if (goalRows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(goalRows), "Goles");
+  // Una hoja por parte, que es como se analiza despues: que paso en la primera
+  // y que paso en la segunda.
+  halvesOf(match).forEach((h) => {
+    const rows = h.players.filter(hasActivity).map(playerRow);
+    if (rows.length) addSheet(wb, rows, halfLabel(h.half), `Parte ${h.half}`);
+  });
 
-  const dateLabel = new Date(match.date).toLocaleDateString("es-ES").replace(/\//g, "-");
-  const rivalLabel = (match.rivalName || "rival").replace(/\s+/g, "_");
-  XLSX.writeFile(wb, `${(teamName || "equipo").replace(/\s+/g, "_")}_${dateLabel}_vs_${rivalLabel}.xlsx`);
+  const goalRows = goalRowsOf(match);
+  if (goalRows.length) addSheet(wb, goalRows, "Goles");
+
+  if ((match.convocados || []).length) {
+    addSheet(wb, match.convocados.map((p) => ({ Dorsal: p.number, Jugador: p.name })), "Convocatoria");
+  }
+
+  const dateLabel = dateLabelOf(match.date);
+  const rivalLabel = sanitizeFileName(match.rivalName) || "rival";
+  XLSX.writeFile(wb, `${sanitizeFileName(teamName) || "equipo"}_${dateLabel}_vs_${rivalLabel}.xlsx`);
 }
 
 // No hay librería de PDF empaquetada, así que esto monta un informe listo para
@@ -243,33 +327,77 @@ function exportSingleMatchToExcel(match, teamName) {
 // sale el PDF. Funciona igual sin conexión, porque no descarga nada.
 function printMatchReport(match, teamName) {
   const dateStr = new Date(match.date).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" });
-  const rows = match.players.filter((p) => p.seconds > 0 || p.goals || p.fouls || p.yellow || p.red || p.saves || p.recoveries || p.turnovers || p.shotsOn || p.shotsOff);
-  const rowsHtml = rows.map((p) => `<tr>
-      <td>${p.number}</td><td>${p.name}</td><td>${p.position}</td><td>${fmtMin(p.seconds)}</td>
-      <td>${p.goals}</td><td>${p.assists}</td><td>${p.shotsOn || 0}</td><td>${p.shotsOff || 0}</td>
-      <td>${p.fouls}</td><td>${p.yellow}</td><td>${p.red}</td><td>${p.recoveries}</td><td>${p.turnovers}</td>
-    </tr>`).join("");
 
-  const html = `
-    <div style="font-family: Arial, Helvetica, sans-serif; color:#111; padding:24px;">
-      <h1 style="font-size:20px; margin:0 0 4px;">${teamName || "Equipo"}</h1>
-      <div style="font-size:12px; color:#555; margin-bottom:16px;">
-        ${dateStr}${match.startTime ? " · Inicio: " + match.startTime : ""}${match.venue ? " · " + match.venue : ""}
-      </div>
-      <h2 style="font-size:16px; margin:0 0 10px;">${teamName || "Equipo"} ${match.teamGoals} — ${match.rivalScore} ${match.rivalName || ""}</h2>
-      <div style="font-size:12px; margin-bottom:16px; color:#333;">
-        Ocasiones a favor: ${match.occFor} · Ocasiones en contra: ${match.occAgainst} · Duración parte: ${match.halfLength} min
-      </div>
-      <table style="width:100%; border-collapse:collapse; font-size:11px;">
+  // Los nombres los escribe el usuario: un "<" en el nombre de un jugador o de
+  // un rival rompia el informe entero al inyectarse crudo en el HTML.
+  const esc = (v) => String(v === undefined || v === null ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  const COLS = 14;
+  const tableFor = (players) => {
+    const rowsHtml = players.filter(hasActivity).map((p) => `<tr>
+        <td>${esc(p.number)}</td><td>${esc(p.name)}</td><td>${esc(p.position)}</td><td>${fmtMin(p.seconds)}</td>
+        <td>${p.goals || 0}</td><td>${p.assists || 0}</td><td>${p.shotsOn || 0}</td><td>${p.shotsOff || 0}</td>
+        <td>${p.fouls || 0}</td><td>${p.yellow || 0}</td><td>${p.red || 0}</td><td>${p.saves || 0}</td>
+        <td>${p.recoveries || 0}</td><td>${p.turnovers || 0}</td>
+      </tr>`).join("");
+    return `<table style="width:100%; border-collapse:collapse; font-size:11px; margin-bottom:6px;">
         <thead>
           <tr style="text-align:left; border-bottom:2px solid #333;">
             <th style="padding:4px;">#</th><th style="padding:4px;">Jugador</th><th style="padding:4px;">Pos</th><th style="padding:4px;">Min</th>
             <th style="padding:4px;">G</th><th style="padding:4px;">A</th><th style="padding:4px;">TP</th><th style="padding:4px;">TF</th>
-            <th style="padding:4px;">F</th><th style="padding:4px;">TA</th><th style="padding:4px;">TR</th><th style="padding:4px;">Rec</th><th style="padding:4px;">Pér</th>
+            <th style="padding:4px;">F</th><th style="padding:4px;">TA</th><th style="padding:4px;">TR</th><th style="padding:4px;">Par</th>
+            <th style="padding:4px;">Rec</th><th style="padding:4px;">Pér</th>
           </tr>
         </thead>
-        <tbody>${rowsHtml || '<tr><td colspan="13" style="padding:8px; color:#888;">Sin acciones registradas</td></tr>'}</tbody>
-      </table>
+        <tbody>${rowsHtml || `<tr><td colspan="${COLS}" style="padding:8px; color:#888;">Sin acciones registradas</td></tr>`}</tbody>
+      </table>`;
+  };
+
+  const sectionTitle = (text, sub) =>
+    `<h3 style="font-size:13px; margin:18px 0 6px; padding-bottom:3px; border-bottom:1px solid #bbb;">${esc(text)}${
+      sub ? ` <span style="font-weight:400; color:#666; font-size:11px;">${esc(sub)}</span>` : ""
+    }</h3>`;
+
+  const halvesHtml = halvesOf(match).map((h) => {
+    const sc = halfScore(match, h.half);
+    return sectionTitle(halfLabel(h.half), `${sc.favor}-${sc.contra}`) + tableFor(h.players);
+  }).join("");
+
+  const goals = match.goalEvents || [];
+  const goalsHtml = !goals.length ? "" : sectionTitle("Goles") +
+    `<table style="width:100%; border-collapse:collapse; font-size:11px;">
+      <thead><tr style="text-align:left; border-bottom:2px solid #333;">
+        <th style="padding:4px;">Parte</th><th style="padding:4px;">Restante</th><th style="padding:4px;">Tipo</th>
+        <th style="padding:4px;">Autor</th><th style="padding:4px;">Fase</th><th style="padding:4px;">En pista</th>
+      </tr></thead>
+      <tbody>${goals.map((ev) => `<tr>
+        <td style="padding:3px 4px;">${esc(ev.half)}ª</td>
+        <td style="padding:3px 4px;">${fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}</td>
+        <td style="padding:3px 4px;">${ev.type === "for" ? "A favor" : "En contra"}</td>
+        <td style="padding:3px 4px;">${esc(ev.authorName || "—")}</td>
+        <td style="padding:3px 4px;">${esc(ev.phase)}</td>
+        <td style="padding:3px 4px; color:#555;">${esc((ev.onCourt || []).map((p) => `#${p.number} ${p.name}`).join(", "))}</td>
+      </tr>`).join("")}</tbody>
+    </table>`;
+
+  const sc1 = halfScore(match, 1), sc2 = halfScore(match, 2);
+
+  const html = `
+    <div style="font-family: Arial, Helvetica, sans-serif; color:#111; padding:24px;">
+      <h1 style="font-size:20px; margin:0 0 4px;">${esc(teamName || "Equipo")}</h1>
+      <div style="font-size:12px; color:#555; margin-bottom:16px;">
+        ${esc(dateStr)}${match.startTime ? " · Inicio: " + esc(match.startTime) : ""}${match.venue ? " · " + esc(match.venue) : ""}
+      </div>
+      <h2 style="font-size:16px; margin:0 0 10px;">${esc(teamName || "Equipo")} ${esc(match.teamGoals)} — ${esc(match.rivalScore)} ${esc(match.rivalName || "")}</h2>
+      <div style="font-size:12px; margin-bottom:16px; color:#333;">
+        1ª parte: ${sc1.favor}-${sc1.contra} · 2ª parte: ${sc2.favor}-${sc2.contra}<br/>
+        Ocasiones a favor: ${esc(match.occFor)} · Ocasiones en contra: ${esc(match.occAgainst)} · Duración parte: ${esc(match.halfLength)} min
+      </div>
+      ${halvesHtml}
+      ${sectionTitle("Total del partido")}
+      ${tableFor(match.players)}
+      ${goalsHtml}
     </div>`;
 
   let container = document.getElementById("print-match-report");
@@ -516,7 +644,10 @@ export default function App() {
 
   const [players, setPlayers] = useState([]);
   const [onCourt, setOnCourt] = useState([]);
-  const [stats, setStats] = useState({});
+  // Cada accion y cada segundo se anotan en la parte en la que ocurren:
+  // { 1: { jugadorId: stats }, 2: { ... } }. El total del partido se calcula
+  // sumando las partes, mas abajo.
+  const [statsByHalf, setStatsByHalf] = useState({});
   const [running, setRunning] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [half, setHalf] = useState(1);
@@ -560,6 +691,10 @@ export default function App() {
 
   const toastTimer = useRef(null);
 
+  // Totales del partido = suma de las partes. Una sola fuente de verdad, para
+  // que el desglose y el total no puedan discrepar.
+  const stats = useMemo(() => sumHalves(statsByHalf, players), [statsByHalf, players]);
+
   const activeTeam = teams.find((t) => t.id === activeTeamId) || { id: null, name: "Mi equipo", subtitle: "", crest: null };
 
   const showToast = useCallback((msg) => {
@@ -586,6 +721,7 @@ export default function App() {
   const onCourtRef = useRef([]);
   const secondsRef = useRef(0);
   const halfLenRef = useRef(20);
+  const halfRef = useRef(1); // parte en curso: a ella se imputan segundos y acciones
   const anchorRef = useRef(null); // instante real del último reparto de tiempo
 
   const trainingRunningRef = useRef(false);
@@ -595,6 +731,7 @@ export default function App() {
   useEffect(() => { onCourtRef.current = onCourt; }, [onCourt]);
   useEffect(() => { secondsRef.current = seconds; }, [seconds]);
   useEffect(() => { halfLenRef.current = halfLength; }, [halfLength]);
+  useEffect(() => { halfRef.current = half; }, [half]);
   useEffect(() => { runningRef.current = running; }, [running]);
   useEffect(() => { trainingActiveRef.current = trainingActive; }, [trainingActive]);
   useEffect(() => { trainingRunningRef.current = trainingRunning; }, [trainingRunning]);
@@ -616,13 +753,14 @@ export default function App() {
       setSeconds(secondsRef.current);
       const ids = onCourtRef.current;
       if (ids.length) {
-        setStats((prev) => {
-          const next = { ...prev };
+        const h = halfRef.current;
+        setStatsByHalf((prev) => {
+          const halfMap = { ...(prev[h] || {}) };
           ids.forEach((id) => {
-            const cur = next[id] || emptyStats();
-            next[id] = { ...cur, seconds: cur.seconds + allowed };
+            const cur = halfMap[id] || emptyStats();
+            halfMap[id] = { ...cur, seconds: cur.seconds + allowed };
           });
-          return next;
+          return { ...prev, [h]: halfMap };
         });
       }
     }
@@ -702,7 +840,7 @@ export default function App() {
       ? {
           v: DRAFT_VERSION, savedAt: new Date().toISOString(),
           seconds, half, halfLength, rivalName, rivalScore, rivalCrest, venue, matchStartTime,
-          occFor, occAgainst, onCourt, convocados, goalEvents, stats,
+          occFor, occAgainst, onCourt, convocados, goalEvents, statsByHalf,
         }
       : null,
     training: trainingInProgress
@@ -826,8 +964,7 @@ export default function App() {
     const startingFive = list.slice(0, 5).map((p) => p.id);
     setOnCourt(startingFive);
     onCourtRef.current = startingFive;
-    const s = {}; list.forEach((p) => (s[p.id] = emptyStats()));
-    setStats(s);
+    setStatsByHalf({});
     setTrainingActive(list.map((p) => p.id));
     const ts = {}; list.forEach((p) => (ts[p.id] = { seconds: 0 }));
     setTrainingStats(ts);
@@ -915,6 +1052,7 @@ export default function App() {
     secondsRef.current = d.seconds || 0;
     setSeconds(d.seconds || 0);
     setHalf(d.half || 1);
+    halfRef.current = d.half || 1;
     halfLenRef.current = d.halfLength || 20;
     setHalfLength(d.halfLength || 20);
     setRivalName(d.rivalName || "Rival");
@@ -930,13 +1068,21 @@ export default function App() {
     setLastEvent(null);
 
     // La plantilla puede haber cambiado desde entonces: se conserva lo que
-    // encaje y se completa el resto a cero, sin inventar jugadores.
-    const saved = d.stats || {};
-    const merged = {};
-    players.forEach((p) => { merged[p.id] = { ...emptyStats(), ...(saved[p.id] || {}) }; });
-    setStats(merged);
+    // encaje y se descarta lo que ya no existe, sin inventar jugadores.
+    // `d.stats` es el formato antiguo (sin desglose): entra como 1ª parte.
+    const savedHalves = d.statsByHalf || (d.stats ? { 1: d.stats } : {});
+    const validIds = new Set(players.map((p) => p.id));
+    const mergedHalves = {};
+    Object.entries(savedHalves).forEach(([h, halfMap]) => {
+      const clean = {};
+      Object.entries(halfMap || {}).forEach(([id, s]) => {
+        if (validIds.has(id)) clean[id] = { ...emptyStats(), ...s };
+      });
+      mergedHalves[h] = clean;
+    });
+    setStatsByHalf(mergedHalves);
 
-    const oc = (d.onCourt || []).filter((id) => merged[id]).slice(0, 5);
+    const oc = (d.onCourt || []).filter((id) => validIds.has(id)).slice(0, 5);
     setOnCourt(oc);
     onCourtRef.current = oc;
 
@@ -1048,13 +1194,17 @@ export default function App() {
     saveDraftNow();
   };
 
-  const bump = (playerId, key, delta = 1) => {
-    setStats((prev) => {
-      const cur = prev[playerId] || emptyStats();
-      const val = Math.max(0, (cur[key] || 0) + delta);
-      return { ...prev, [playerId]: { ...cur, [key]: val } };
+  // `targetHalf` permite deshacer en la parte donde se anotó la acción, aunque
+  // mientras tanto se haya empezado la siguiente.
+  const bump = (playerId, key, delta = 1, targetHalf = null) => {
+    const h = targetHalf || halfRef.current;
+    setStatsByHalf((prev) => {
+      const halfMap = { ...(prev[h] || {}) };
+      const cur = halfMap[playerId] || emptyStats();
+      halfMap[playerId] = { ...cur, [key]: Math.max(0, (cur[key] || 0) + delta) };
+      return { ...prev, [h]: halfMap };
     });
-    if (delta > 0) setLastEvent({ playerId, key });
+    if (delta > 0) setLastEvent({ playerId, key, half: h });
   };
 
   // Deshacer el último registro. El gol guarda su propio autor, así que
@@ -1065,7 +1215,7 @@ export default function App() {
     if (lastGoalEvent) {
       const ev = lastGoalEvent;
       setGoalEvents((prev) => prev.filter((e) => e.id !== ev.id));
-      if (ev.type === "for" && ev.authorId) bump(ev.authorId, "goals", -1);
+      if (ev.type === "for" && ev.authorId) bump(ev.authorId, "goals", -1, ev.half);
       else if (ev.type === "against") setRivalScore((v) => Math.max(0, v - 1));
       setLastGoalEvent(null);
       setLastEvent(null);
@@ -1073,7 +1223,7 @@ export default function App() {
       return;
     }
     if (!lastEvent) return;
-    bump(lastEvent.playerId, lastEvent.key, -1);
+    bump(lastEvent.playerId, lastEvent.key, -1, lastEvent.half);
     setLastEvent(null);
     showToast("Acción deshecha");
   };
@@ -1179,7 +1329,6 @@ export default function App() {
       const nextNum = prev.length ? Math.max(...prev.map((p) => p.number)) + 1 : 1;
       const np = { id: `p${Date.now()}`, name: "Nuevo jugador", number: nextNum, position: "ALA", isGK: false, photo: null };
       const next = [...prev, np];
-      setStats((s) => ({ ...s, [np.id]: emptyStats() }));
       setTrainingStats((s) => ({ ...s, [np.id]: { seconds: 0 } }));
       persistRoster(next);
       return next;
@@ -1197,9 +1346,9 @@ export default function App() {
   const resetMatch = () => {
     setClockRunning(false);
     secondsRef.current = 0;
-    setSeconds(0); setHalf(1); setRivalScore(0); setOccFor(0); setOccAgainst(0);
+    setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setOccFor(0); setOccAgainst(0);
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
-    const s = {}; players.forEach((p) => (s[p.id] = emptyStats())); setStats(s);
+    setStatsByHalf({});
     const startingFive = players.slice(0, 5).map((p) => p.id);
     setOnCourt(startingFive); onCourtRef.current = startingFive;
     setLastEvent(null);
@@ -1231,9 +1380,9 @@ export default function App() {
 
     setClockRunning(false);
     secondsRef.current = 0;
-    setSeconds(0); setHalf(1); setRivalScore(0); setOccFor(0); setOccAgainst(0);
+    setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setOccFor(0); setOccAgainst(0);
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
-    const s = {}; players.forEach((p) => (s[p.id] = emptyStats())); setStats(s);
+    setStatsByHalf({});
     setConvocados(selectedIds);
     const startingFive = selectedIds.slice(0, 5);
     setOnCourt(startingFive); onCourtRef.current = startingFive;
@@ -1249,9 +1398,15 @@ export default function App() {
     const convocadosList = convocados
       ? players.filter((p) => convocados.includes(p.id)).map((p) => ({ id: p.id, name: p.name, number: p.number }))
       : players.map((p) => ({ id: p.id, name: p.name, number: p.number }));
+    const rowsFrom = (statsMap) => players.map((p) => ({
+      name: p.name, number: p.number, position: p.position, isGK: p.isGK,
+      ...emptyStats(), ...((statsMap || {})[p.id] || {}),
+    }));
     const record = {
       date: new Date().toISOString(), rivalName, teamGoals, rivalScore, occFor, occAgainst, halfLength, venue, startTime: matchStartTime,
-      players: players.map((p) => ({ name: p.name, number: p.number, position: p.position, isGK: p.isGK, ...emptyStats(), ...(stats[p.id] || {}) })),
+      players: rowsFrom(stats), // total del partido
+      // Desglose por parte, en el orden en que se jugaron.
+      halves: halvesPresent(statsByHalf, goalEvents).map((h) => ({ half: h, players: rowsFrom(statsByHalf[h]) })),
       goalEvents, // additive: full history of who scored, from what phase, with the exact 5 on court at that moment
       convocados: convocadosList, // additive: who was called up for this match
     };
@@ -1273,10 +1428,12 @@ export default function App() {
   };
 
   const startNextHalf = () => {
-    setClockRunning(false);
+    setClockRunning(false); // liquida el tiempo pendiente en la parte que acaba
     secondsRef.current = 0;
     setSeconds(0);
-    setHalf((h) => h + 1);
+    const next = halfRef.current + 1;
+    halfRef.current = next; // a partir de aqui todo se anota en la parte nueva
+    setHalf(next);
     saveDraftNow();
   };
 
@@ -1289,7 +1446,7 @@ export default function App() {
     setClockRunning(false);
     setTrainingClockRunning(false);
     secondsRef.current = 0;
-    setSeconds(0); setHalf(1); setRivalScore(0); setOccFor(0); setOccAgainst(0);
+    setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setOccFor(0); setOccAgainst(0);
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setLastEvent(null); setLastGoalEvent(null); setGoalEvents([]); setConvocados(null);
     setTrainingSeconds(0);
@@ -1619,7 +1776,7 @@ export default function App() {
       )}
 
       {summaryOpen && (
-        <SummaryModal players={sortedPlayers} stats={stats} goalEvents={goalEvents} onClose={() => setSummaryOpen(false)} />
+        <SummaryModal players={sortedPlayers} stats={stats} statsByHalf={statsByHalf} goalEvents={goalEvents} onClose={() => setSummaryOpen(false)} />
       )}
 
       {teamManagerOpen && (
@@ -1932,70 +2089,110 @@ function SubstitutionPicker({ incoming, onCourtPlayers, stats, onPick, onClose }
   );
 }
 
-function SummaryModal({ players, stats, goalEvents, onClose }) {
+/* Tabla de estadísticas reutilizada por cada sección del resumen. */
+function StatsTable({ players, statsMap }) {
   const rows = players.filter((p) => {
-    const s = stats[p.id];
-    return s && (s.seconds > 0 || s.goals || s.assists || s.shotsOn || s.shotsOff || s.turnovers || s.recoveries || s.fouls || s.yellow || s.red);
+    const s = statsMap[p.id];
+    return s && (s.seconds > 0 || s.goals || s.assists || s.shotsOn || s.shotsOff || s.turnovers || s.recoveries || s.fouls || s.yellow || s.red || s.saves);
   });
+  if (!rows.length) {
+    return <div style={{ padding: "10px 4px", color: T.dim, fontSize: 12 }}>Sin actividad registrada en esta parte.</div>;
+  }
+  const th = { padding: "4px 6px", position: "sticky", top: 0, background: T.surface };
+  const td = { padding: "4px 6px" };
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ color: T.dim, textAlign: "left" }}>
+            <th style={th}>#</th><th style={th}>Jugador</th><th style={th}>Min</th>
+            <th style={th}>G</th><th style={th}>A</th>
+            <th style={th}>TP</th><th style={th}>TF</th>
+            <th style={th}>Pér</th><th style={th}>Rec</th>
+            <th style={th}>F</th><th style={th}>TA</th><th style={th}>TR</th><th style={th}>Par</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((p) => {
+            const s = statsMap[p.id];
+            return (
+              <tr key={p.id} style={{ borderTop: `1px solid ${T.line}` }}>
+                <td style={{ ...td, color: T.red, fontWeight: 600 }}>{p.number}</td>
+                <td style={td}>{p.name}</td>
+                <td style={td}>{fmtMin(s.seconds)}</td>
+                <td style={td}>{s.goals}</td><td style={td}>{s.assists}</td>
+                <td style={td}>{s.shotsOn}</td><td style={td}>{s.shotsOff}</td>
+                <td style={td}>{s.turnovers}</td><td style={td}>{s.recoveries}</td>
+                <td style={td}>{s.fouls}</td><td style={td}>{s.yellow}</td><td style={td}>{s.red}</td><td style={td}>{s.saves}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function GoalLine({ ev }) {
+  return (
+    <div style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, padding: "6px 10px", fontSize: 11 }}>
+      <span style={{ fontWeight: 700, color: ev.type === "for" ? T.red : T.negative }}>
+        {ev.type === "for" ? `⚽ ${ev.authorName}` : "⚽ Rival"}
+      </span>
+      {" · "}{ev.phase} · {fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}
+      <div style={{ color: T.dim, marginTop: 2 }}>Quinteto en pista: {(ev.onCourt || []).map((p) => `#${p.number} ${p.name}`).join(", ")}</div>
+    </div>
+  );
+}
+
+function SectionHeading({ title, right, accent }) {
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 6, paddingBottom: 4, borderBottom: `1px solid ${accent || T.line}` }}>
+      <span className="oswald" style={{ fontSize: 15, fontWeight: 600, color: accent || T.text, textTransform: "uppercase", letterSpacing: 0.5 }}>{title}</span>
+      {right && <span className="oswald" style={{ fontSize: 15, fontWeight: 700, color: accent || T.dim }}>{right}</span>}
+    </div>
+  );
+}
+
+/* Resumen en tres bloques: 1ª parte, 2ª parte y total del partido. Cada parte
+   lleva su propio marcador y sus goles, que es como se lee un partido de
+   fútbol sala: casi siempre importa en qué mitad pasó cada cosa. */
+function SummaryModal({ players, stats, statsByHalf, goalEvents, onClose }) {
+  const halves = halvesPresent(statsByHalf, goalEvents);
+  const scoreOf = (h) => {
+    const evs = (goalEvents || []).filter((ev) => Number(ev.half) === h);
+    return `${evs.filter((e) => e.type === "for").length}-${evs.filter((e) => e.type !== "for").length}`;
+  };
+  const totalFor = (goalEvents || []).filter((e) => e.type === "for").length;
+  const totalAgainst = (goalEvents || []).length - totalFor;
+
   return (
     <div style={overlayStyle} onClick={onClose}>
-      <div style={{ ...modalCard, maxWidth: 560, maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()} className="fadein">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+      <div style={{ ...modalCard, maxWidth: 620, maxHeight: "84vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()} className="fadein">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, position: "sticky", top: -18, background: T.surface, paddingTop: 2, zIndex: 1 }}>
           <div className="oswald" style={{ fontSize: 17, fontWeight: 600 }}>Resumen del partido</div>
           <button onClick={onClose} style={iconBtnSm}><X size={16} /></button>
         </div>
-        {!rows.length ? (
-          <div style={{ padding: 16, textAlign: "center", color: T.dim, fontSize: 13 }}>Todavía no hay acciones registradas.</div>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ color: T.dim, textAlign: "left" }}>
-                  <th style={{ padding: "4px 6px" }}>#</th><th style={{ padding: "4px 6px" }}>Jugador</th><th style={{ padding: "4px 6px" }}>Min</th>
-                  <th style={{ padding: "4px 6px" }}>G</th><th style={{ padding: "4px 6px" }}>A</th>
-                  <th style={{ padding: "4px 6px" }}>TP</th><th style={{ padding: "4px 6px" }}>TF</th>
-                  <th style={{ padding: "4px 6px" }}>Pér</th><th style={{ padding: "4px 6px" }}>Rec</th>
-                  <th style={{ padding: "4px 6px" }}>F</th><th style={{ padding: "4px 6px" }}>TA</th><th style={{ padding: "4px 6px" }}>TR</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((p) => {
-                  const s = stats[p.id];
-                  return (
-                    <tr key={p.id} style={{ borderTop: `1px solid ${T.line}` }}>
-                      <td style={{ padding: "4px 6px", color: T.red, fontWeight: 600 }}>{p.number}</td>
-                      <td style={{ padding: "4px 6px" }}>{p.name}</td>
-                      <td style={{ padding: "4px 6px" }}>{fmtMin(s.seconds)}</td>
-                      <td style={{ padding: "4px 6px" }}>{s.goals}</td><td style={{ padding: "4px 6px" }}>{s.assists}</td>
-                      <td style={{ padding: "4px 6px" }}>{s.shotsOn}</td><td style={{ padding: "4px 6px" }}>{s.shotsOff}</td>
-                      <td style={{ padding: "4px 6px" }}>{s.turnovers}</td><td style={{ padding: "4px 6px" }}>{s.recoveries}</td>
-                      <td style={{ padding: "4px 6px" }}>{s.fouls}</td><td style={{ padding: "4px 6px" }}>{s.yellow}</td><td style={{ padding: "4px 6px" }}>{s.red}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
 
-        {(goalEvents || []).length > 0 && (
-          <div style={{ marginTop: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
-              Goles y quinteto en pista
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {goalEvents.map((ev) => (
-                <div key={ev.id} style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, padding: "6px 10px", fontSize: 11 }}>
-                  <span style={{ fontWeight: 700, color: ev.type === "for" ? T.red : T.negative }}>
-                    {ev.type === "for" ? `⚽ ${ev.authorName}` : "⚽ Rival"}
-                  </span>
-                  {" · "}{ev.phase} · {ev.half}ª parte · {fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}
-                  <div style={{ color: T.dim, marginTop: 2 }}>Quinteto en pista: {(ev.onCourt || []).map((p) => `#${p.number} ${p.name}`).join(", ")}</div>
+        {halves.map((h) => {
+          const goalsThisHalf = (goalEvents || []).filter((ev) => Number(ev.half) === h);
+          return (
+            <div key={h} style={{ marginBottom: 22 }}>
+              <SectionHeading title={halfLabel(h)} right={scoreOf(h)} />
+              <StatsTable players={players} statsMap={statsByHalf[h] || {}} />
+              {goalsThisHalf.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                  {goalsThisHalf.map((ev) => <GoalLine key={ev.id} ev={ev} />)}
                 </div>
-              ))}
+              )}
             </div>
-          </div>
-        )}
+          );
+        })}
+
+        <div>
+          <SectionHeading title="Total del partido" right={`${totalFor}-${totalAgainst}`} accent={T.red} />
+          <StatsTable players={players} statsMap={stats} />
+        </div>
       </div>
     </div>
   );
@@ -2387,76 +2584,13 @@ function HistoryView({ matches, trainings, teamName, subTab, onSubTabChange, onE
           <div style={{ padding: 20, textAlign: "center", color: T.dim, fontSize: 13, border: `1px dashed ${T.line}`, borderRadius: 12 }}>Todavía no hay partidos guardados. Finaliza un partido para verlo aquí.</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {matches.map((m) => {
-              const isOpen = open === m.date;
-              return (
-                <div key={m.date} style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 14, overflow: "hidden" }}>
-                  <div onClick={() => setOpen(isOpen ? null : m.date)} style={{ padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", gap: 10 }}>
-                    <div>
-                      <div style={{ fontSize: 11, color: T.dim }}>{new Date(m.date).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })}</div>
-                      <div className="oswald" style={{ fontSize: 16, fontWeight: 600 }}>{(teamName || "").split(" ")[0]} {m.teamGoals} — {m.rivalScore} {m.rivalName}</div>
-                    </div>
-                    <div style={{ fontSize: 11, color: T.dim }}>Ocasiones {m.occFor}–{m.occAgainst}</div>
-                  </div>
-                  {isOpen && (
-                    <div style={{ borderTop: `1px solid ${T.line}`, padding: 12, overflowX: "auto" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-                        <div style={{ fontSize: 11, color: T.dim }}>
-                          {m.startTime ? `Inicio: ${m.startTime}` : ""}{m.venue ? `${m.startTime ? " · " : ""}${m.venue}` : ""}
-                        </div>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <button onClick={() => exportSingleMatchToExcel(m, teamName)} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px" }}><FileSpreadsheet size={12} /> Excel</button>
-                          <button onClick={() => printMatchReport(m, teamName)} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px" }}><Save size={12} /> PDF</button>
-                        </div>
-                      </div>
-                      <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
-                        <thead>
-                          <tr style={{ color: T.dim, textAlign: "left" }}>
-                            <th style={{ padding: "4px 6px" }}>#</th><th style={{ padding: "4px 6px" }}>Jugador</th><th style={{ padding: "4px 6px" }}>Min</th>
-                            <th style={{ padding: "4px 6px" }}>G</th><th style={{ padding: "4px 6px" }}>A</th>
-                            <th style={{ padding: "4px 6px" }}>TP</th><th style={{ padding: "4px 6px" }}>TF</th>
-                            <th style={{ padding: "4px 6px" }}>F</th>
-                            <th style={{ padding: "4px 6px" }}>TA</th><th style={{ padding: "4px 6px" }}>TR</th><th style={{ padding: "4px 6px" }}>Par</th>
-                            <th style={{ padding: "4px 6px" }}>Rec</th><th style={{ padding: "4px 6px" }}>Pér</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {m.players.filter((p) => p.seconds > 0 || p.goals || p.fouls).map((p, i) => (
-                            <tr key={i} style={{ borderTop: `1px solid ${T.line}` }}>
-                              <td style={{ padding: "4px 6px", color: T.red, fontWeight: 600 }}>{p.number}</td>
-                              <td style={{ padding: "4px 6px" }}>{p.name}</td>
-                              <td style={{ padding: "4px 6px" }}>{fmtMin(p.seconds)}</td>
-                              <td style={{ padding: "4px 6px" }}>{p.goals}</td><td style={{ padding: "4px 6px" }}>{p.assists}</td>
-                              <td style={{ padding: "4px 6px" }}>{p.shotsOn || 0}</td><td style={{ padding: "4px 6px" }}>{p.shotsOff || 0}</td>
-                              <td style={{ padding: "4px 6px" }}>{p.fouls}</td><td style={{ padding: "4px 6px" }}>{p.yellow}</td>
-                              <td style={{ padding: "4px 6px" }}>{p.red}</td><td style={{ padding: "4px 6px" }}>{p.saves}</td>
-                              <td style={{ padding: "4px 6px" }}>{p.recoveries}</td><td style={{ padding: "4px 6px" }}>{p.turnovers}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-
-                      {(m.goalEvents || []).length > 0 && (
-                        <div style={{ marginTop: 14 }}>
-                          <div style={{ fontSize: 11, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Goles</div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                            {m.goalEvents.map((ev) => (
-                              <div key={ev.id} style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, padding: "6px 10px", fontSize: 11 }}>
-                                <span style={{ fontWeight: 700, color: ev.type === "for" ? T.red : T.negative }}>
-                                  {ev.type === "for" ? `⚽ ${ev.authorName}` : "⚽ Rival"}
-                                </span>
-                                {" · "}{ev.phase} · {ev.half}ª parte · {fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}
-                                <div style={{ color: T.dim, marginTop: 2 }}>En pista: {(ev.onCourt || []).map((p) => `#${p.number} ${p.name}`).join(", ")}</div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {matches.map((m) => (
+              <SavedMatchCard
+                key={m.date} match={m} teamName={teamName}
+                isOpen={open === m.date}
+                onToggle={() => setOpen(open === m.date ? null : m.date)}
+              />
+            ))}
           </div>
         )
       )}
@@ -2504,6 +2638,104 @@ function HistoryView({ matches, trainings, teamName, subTab, onSubTabChange, onE
             })}
           </div>
         )
+      )}
+    </div>
+  );
+}
+
+/* Ficha de un partido ya guardado. Igual que el resumen en directo, deja ver
+   cada parte por separado o el total, sin apilar tres tablas en pantalla. */
+function SavedMatchCard({ match: m, teamName, isOpen, onToggle }) {
+  const halves = halvesOf(m);
+  const [tab, setTab] = useState("total");
+  const scoreOf = (h) => { const s = halfScore(m, h); return `${s.favor}-${s.contra}`; };
+
+  const shown = tab === "total" ? m.players : (halves.find((h) => String(h.half) === String(tab)) || { players: [] }).players;
+  const goalsShown = tab === "total" ? (m.goalEvents || []) : (m.goalEvents || []).filter((ev) => String(ev.half) === String(tab));
+  const td = { padding: "4px 6px" };
+
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 14, overflow: "hidden" }}>
+      <div onClick={onToggle} style={{ padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 11, color: T.dim }}>{new Date(m.date).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })}</div>
+          <div className="oswald" style={{ fontSize: 16, fontWeight: 600 }}>{(teamName || "").split(" ")[0]} {m.teamGoals} — {m.rivalScore} {m.rivalName}</div>
+          {halves.length > 0 && (
+            <div style={{ fontSize: 10, color: T.dim, marginTop: 2 }}>1ª {scoreOf(1)} · 2ª {scoreOf(2)}</div>
+          )}
+        </div>
+        <div style={{ fontSize: 11, color: T.dim }}>Ocasiones {m.occFor}–{m.occAgainst}</div>
+      </div>
+
+      {isOpen && (
+        <div style={{ borderTop: `1px solid ${T.line}`, padding: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: T.dim }}>
+              {m.startTime ? `Inicio: ${m.startTime}` : ""}{m.venue ? `${m.startTime ? " · " : ""}${m.venue}` : ""}
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => exportSingleMatchToExcel(m, teamName)} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px" }}><FileSpreadsheet size={12} /> Excel</button>
+              <button onClick={() => printMatchReport(m, teamName)} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px" }}><Save size={12} /> PDF</button>
+            </div>
+          </div>
+
+          {/* Los partidos guardados antes de que existiera el desglose solo
+              tienen el total, y entonces no hay nada que elegir. */}
+          {halves.length > 0 && (
+            <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+              {halves.map((h) => (
+                <SubTabBtn key={h.half} active={String(tab) === String(h.half)} onClick={() => setTab(String(h.half))} label={`${halfLabel(h.half)} · ${scoreOf(h.half)}`} />
+              ))}
+              <SubTabBtn active={tab === "total"} onClick={() => setTab("total")} label={`Total · ${m.teamGoals}-${m.rivalScore}`} />
+            </div>
+          )}
+
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ color: T.dim, textAlign: "left" }}>
+                  <th style={td}>#</th><th style={td}>Jugador</th><th style={td}>Min</th>
+                  <th style={td}>G</th><th style={td}>A</th>
+                  <th style={td}>TP</th><th style={td}>TF</th>
+                  <th style={td}>F</th>
+                  <th style={td}>TA</th><th style={td}>TR</th><th style={td}>Par</th>
+                  <th style={td}>Rec</th><th style={td}>Pér</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.filter(hasActivity).map((p, i) => (
+                  <tr key={i} style={{ borderTop: `1px solid ${T.line}` }}>
+                    <td style={{ ...td, color: T.red, fontWeight: 600 }}>{p.number}</td>
+                    <td style={td}>{p.name}</td>
+                    <td style={td}>{fmtMin(p.seconds)}</td>
+                    <td style={td}>{p.goals}</td><td style={td}>{p.assists}</td>
+                    <td style={td}>{p.shotsOn || 0}</td><td style={td}>{p.shotsOff || 0}</td>
+                    <td style={td}>{p.fouls}</td><td style={td}>{p.yellow}</td>
+                    <td style={td}>{p.red}</td><td style={td}>{p.saves}</td>
+                    <td style={td}>{p.recoveries}</td><td style={td}>{p.turnovers}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {goalsShown.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Goles</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {goalsShown.map((ev) => (
+                  <div key={ev.id} style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, padding: "6px 10px", fontSize: 11 }}>
+                    <span style={{ fontWeight: 700, color: ev.type === "for" ? T.red : T.negative }}>
+                      {ev.type === "for" ? `⚽ ${ev.authorName}` : "⚽ Rival"}
+                    </span>
+                    {" · "}{ev.phase} · {ev.half}ª parte · {fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}
+                    <div style={{ color: T.dim, marginTop: 2 }}>En pista: {(ev.onCourt || []).map((p) => `#${p.number} ${p.name}`).join(", ")}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

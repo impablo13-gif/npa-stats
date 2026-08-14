@@ -117,6 +117,19 @@ pantalla de inicio de la app («Hay una versión nueva…») y se aplica al puls
 | `tools/make-icons.mjs` | Genera los iconos sin depender de librerías de imagen. |
 | `.github/workflows/deploy.yml` | Compila y publica en GitHub Pages en cada push. |
 
+### Datos por parte
+
+Cada acción y cada segundo se anotan **en la parte en la que ocurren**, y el
+total del partido se calcula sumando las partes. Eso aparece en tres sitios:
+
+- **Resumen** (durante el partido): tres secciones — 1ª parte, 2ª parte y total,
+  cada parte con su marcador y sus goles.
+- **Historial**: la ficha de cada partido guardado deja cambiar entre 1ª, 2ª y
+  total.
+- **Excel y PDF**: hoja/sección por parte, además del total.
+
+Si algún día se juega una prórroga, aparece como una parte más.
+
 ### Detalles que conviene conocer
 
 - **El reloj no cuenta «tics»**, sino tiempo real del sistema. Los navegadores de
