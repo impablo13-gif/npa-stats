@@ -1836,17 +1836,21 @@ export default function App() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 10 }}>
               {sortedPlayers.filter((p) => !convocados || convocados.includes(p.id)).map((p) => {
                 const isOn = onCourt.includes(p.id);
-                // Acumulado de ESTA parte (arranca de 0 en cada parte) y tiempo
-                // seguido en pista desde la última vez que entró — los dos
-                // derivan de `seconds`, así que se actualizan solos cada
-                // segundo y se congelan solos en cuanto se pausa el reloj.
-                const halfSeconds = (statsByHalf[half] && statsByHalf[half][p.id] && statsByHalf[half][p.id].seconds) || 0;
+                // El acumulado de la parte SIGUE sumando por debajo cada
+                // segundo (statsByHalf), porque de ahí salen el resumen, el
+                // historial y las exportaciones — eso no cambia. Lo que
+                // cambia es lo que se ENSEÑA: mientras el jugador está en
+                // pista no interesa verlo subir solo; se muestra congelado en
+                // lo que ya llevaba ANTES de esta tanda, y salta de golpe a
+                // incluirla en cuanto sale (exactamente en la sustitución).
+                const halfSecondsLive = (statsByHalf[half] && statsByHalf[half][p.id] && statsByHalf[half][p.id].seconds) || 0;
                 const stint = stintsRef.current.get(p.id);
                 const stintSeconds = isOn && stint && stint.half === half ? Math.max(0, stint.startRemaining - remaining) : 0;
+                const accumulatedSeconds = isOn ? Math.max(0, halfSecondsLive - stintSeconds) : halfSecondsLive;
                 return (
                   <PlayerCard
                     key={p.id} player={p} stats={stats[p.id] || emptyStats()} onCourt={isOn}
-                    halfSeconds={halfSeconds} stintSeconds={stintSeconds}
+                    accumulatedSeconds={accumulatedSeconds} stintSeconds={stintSeconds}
                     armed={!!pendingAction || !!(goalWizard && goalWizard.type === "for" && !goalWizard.authorId)}
                     onTap={() => handlePlayerTap(p)}
                     onOpenStats={() => setStatPlayer(p.id)}
@@ -2815,10 +2819,9 @@ function TabBtn({ active, onClick, icon: Icon, label }) {
   );
 }
 
-function PlayerCard({ player, stats, onCourt, halfSeconds, stintSeconds, armed, onTap, onOpenStats }) {
+function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, armed, onTap, onOpenStats }) {
   const hasBadges = stats.goals > 0 || stats.yellow > 0 || stats.red > 0;
-  const labelColor = onCourt ? "rgba(10,10,10,0.6)" : T.dim;
-  const valueColor = onCourt ? T.bg : T.dim;
+  const accumColor = onCourt ? "rgba(10,10,10,0.55)" : T.dim;
   return (
     <div
       onClick={onTap}
@@ -2834,26 +2837,32 @@ function PlayerCard({ player, stats, onCourt, halfSeconds, stintSeconds, armed, 
         <Avatar player={player} size={56} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: onCourt ? T.bg : T.text }}>{player.name}</div>
-          {/* Dos relojes: el acumulado de ESTA parte (arranca de 0 en cada
-              parte) y el tiempo que lleva seguido en pista desde la última
-              vez que entró (a cero en cuanto se sienta en el banquillo). El
-              de "en pista" es el que más se mira en directo, así que va más
-              grande que el de la parte. */}
-          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 1 }}>
-            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: labelColor }}>Parte</span>
-            <span className="oswald" style={{ fontSize: 19, fontWeight: 700, lineHeight: 1.1, color: valueColor }}>{fmtMin(halfSeconds)}</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: labelColor }}>En pista</span>
-            <span className="oswald" style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.1, color: valueColor }}>{onCourt ? fmtMin(stintSeconds) : "—"}</span>
-          </div>
         </div>
         <div className="oswald" style={{ fontSize: 34, fontWeight: 700, color: onCourt ? T.bg : T.red, lineHeight: 1, flexShrink: 0 }}>{player.number}</div>
       </div>
 
+      {/* El tiempo de ESTA tanda en pista: solo existe mientras el jugador
+          está en pista, así que solo se enseña entonces — a todo lo ancho de
+          la tarjeta para aprovecharla, sin etiqueta porque es el único número
+          grande, y en blanco para que se distinga del acumulado de más abajo
+          a simple vista. */}
+      {onCourt && (
+        <div className="oswald" style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: T.white, marginTop: 8 }}>
+          {fmtMin(stintSeconds)}
+        </div>
+      )}
+
       {/* La ficha detallada del jugador estaba programada pero no había forma de
-          llegar a ella: este botón es su acceso. */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, gap: 6, minHeight: 22 }}>
+          llegar a ella: este botón es su acceso. El acumulado de la parte va
+          justo encima, ya bien separado del número grande de arriba — mientras
+          el jugador está en pista se queda congelado en lo que ya llevaba
+          antes de esta tanda, y en cuanto sale salta de golpe a incluirla, en
+          el mismo instante de la sustitución. */}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginTop: onCourt ? 14 : 6 }}>
+        <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.3, color: accumColor }}>Parte</span>
+        <span className="oswald" style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.1, color: accumColor }}>{fmtMin(accumulatedSeconds)}</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6, gap: 6, minHeight: 22 }}>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {hasBadges && (
             <>
