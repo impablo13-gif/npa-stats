@@ -147,8 +147,8 @@ const QUICK_STAT_ACTIONS = [
 const DISCIPLINE_KEYS = new Set(["fouls", "foulsReceived", "yellow", "red"]);
 const DISCIPLINE_LABEL = { fouls: "Falta cometida", foulsReceived: "Falta recibida", yellow: "Amarilla", red: "Roja" };
 const DISCIPLINE_COLOR = { fouls: T.negative, foulsReceived: T.red, yellow: T.amber, red: T.negative };
-const ZONED_LABEL = { turnovers: "Pérdida", recoveries: "Recuperación", shotsOn: "Tiro a puerta", shotsOff: "Tiro fuera" };
-const ZONED_COLOR = { turnovers: T.dim, recoveries: T.red, shotsOn: T.red, shotsOff: T.dim };
+const ZONED_LABEL = { turnovers: "Pérdida", recoveries: "Recuperación", shotsOn: "Tiro a puerta", shotsOff: "Tiro fuera", fouls: "Falta cometida", foulsReceived: "Falta recibida" };
+const ZONED_COLOR = { turnovers: T.dim, recoveries: T.red, shotsOn: T.red, shotsOff: T.dim, fouls: T.negative, foulsReceived: T.red };
 
 // The bottom bar's own dedicated "Tarjeta" button opens this separate, smaller picker.
 const CARD_ACTIONS = [
@@ -187,9 +187,11 @@ const PITCH_ZONES = [
 ];
 const PITCH_ZONE_LABEL = Object.fromEntries(PITCH_ZONES.map((z) => [z.key, z.label.replace("\n", " ")]));
 
-// Estas cuatro acciones llevan quién y en qué zona del campo, con el mismo
+// Estas acciones llevan quién y en qué zona del campo, con el mismo
 // asistente en tres pasos que ya usan los goles: acción → jugador → zona.
-const ZONED_KEYS = new Set(["turnovers", "recoveries", "shotsOn", "shotsOff"]);
+// Las faltas, además, siguen llevando el minuto exacto (bump las trata
+// también como DISCIPLINE_KEYS), así que la zona se suma a lo que ya había.
+const ZONED_KEYS = new Set(["turnovers", "recoveries", "shotsOn", "shotsOff", "fouls", "foulsReceived"]);
 
 // Some browsers rotate the <img> preview to respect a photo's EXIF orientation tag but
 // ignore that same tag when the pixels are later drawn onto a <canvas> — which is exactly
@@ -278,6 +280,7 @@ const disciplineRowsOf = (match) => (match.disciplineEvents || []).map((ev) => (
   "Tiempo restante": fmtClock(ev.remaining),
   Tipo: DISCIPLINE_LABEL[ev.type] || ev.type,
   Dorsal: ev.playerNumber, Jugador: ev.playerName,
+  Zona: ev.zone ? PITCH_ZONE_LABEL[ev.zone] || ev.zone : "",
 }));
 
 const zonedRowsOf = (match) => (match.zonedEvents || []).map((ev) => ({
@@ -550,8 +553,8 @@ const POS_GROUP_ICON = { POR: "🧤", CIE: "🛡", ALA: "🪽", PIV: "🎯" };
 
 // Monta el HTML del informe (mismo diseño de siempre: cabecera, minutos,
 // goles, cronología, faltas, tiros, presencia en pista, fichas). Es una
-// función pura -- no toca el DOM -- para poder tanto mostrarlo como
-// rasterizarlo a páginas de un .docx en generateMatchReportDocx, más abajo.
+// función pura -- no toca el DOM -- para que openMatchReportTab, más abajo,
+// pueda escribirla directamente en una pestaña nueva.
 //
 // `rosterPlayers` es la plantilla ACTUAL (con fotos) — se cruza con los datos
 // guardados del partido para poder ilustrarlo, ya que las fotos no se
@@ -922,85 +925,56 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
     </div>`;
 }
 
-// Genera el informe como .docx (fácil de convertir a PDF desde Word o desde
-// cualquier impresora virtual), con exactamente el mismo diseño que ya
-// existía en pantalla: se renderiza el HTML de siempre fuera de la vista, se
-// rasteriza con html2canvas -- así los gráficos SVG (donut, cronología,
-// campo) y el grid/flexbox del diseño salen pixel a pixel iguales -- y esa
-// captura se trocea en páginas A4 que se insertan como imágenes en el .docx.
-// No queda texto seleccionable, pero es justo lo que se pidió: mismo
-// aspecto, fácil de pasar a PDF, sin depender de conexión para generarlo.
-async function generateMatchReportDocx(match, teamName, rosterPlayers, teamCrest) {
-  const [{ Document, Packer, ImageRun, Paragraph, PageBreak }, { default: html2canvas }] = await Promise.all([
-    import("docx"), import("html2canvas"),
-  ]);
-
-  const html = buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest);
-
-  const RENDER_WIDTH = 900; // px — el mismo max-width que ya usaba el informe en pantalla
-  const container = document.createElement("div");
-  container.style.cssText = `position:fixed; left:-10000px; top:0; width:${RENDER_WIDTH}px; background:#fff;`;
-  container.innerHTML = html;
-  document.body.appendChild(container);
-
-  try {
-    // Las fotos y escudos son data URLs, pero <img> igualmente necesita un
-    // ciclo de carga/decodificado antes de que html2canvas pueda pintarlas.
-    const imgs = Array.from(container.querySelectorAll("img"));
-    await Promise.all(imgs.map((img) => (img.complete ? Promise.resolve() : new Promise((res) => { img.onload = res; img.onerror = res; }))));
-
-    const fullCanvas = await html2canvas(container, { scale: 2, backgroundColor: "#ffffff", useCORS: true, width: RENDER_WIDTH, windowWidth: RENDER_WIDTH });
-
-    // Se trocea la captura en páginas con la proporción de un A4 vertical, a
-    // la misma escala que el ancho capturado -- así cada página del .docx
-    // corresponde a un trozo real y nítido de la captura, no a una imagen
-    // gigante que Word tendría que encajar como pudiera.
-    const A4_RATIO = 297 / 210;
-    const pageWidthPx = fullCanvas.width;
-    const pageHeightPx = Math.round(pageWidthPx * A4_RATIO);
-    const totalPages = Math.max(1, Math.ceil(fullCanvas.height / pageHeightPx));
-    const A4_W_PX = 794, A4_H_PX = 1123; // A4 a 96dpi, el tamaño de página que se declara más abajo
-
-    const children = [];
-    for (let i = 0; i < totalPages; i++) {
-      const sliceHeight = Math.min(pageHeightPx, fullCanvas.height - i * pageHeightPx);
-      const sliceCanvas = document.createElement("canvas");
-      sliceCanvas.width = pageWidthPx;
-      sliceCanvas.height = sliceHeight;
-      const ctx = sliceCanvas.getContext("2d");
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, pageWidthPx, sliceHeight);
-      ctx.drawImage(fullCanvas, 0, i * pageHeightPx, pageWidthPx, sliceHeight, 0, 0, pageWidthPx, sliceHeight);
-      const blob = await new Promise((res) => sliceCanvas.toBlob(res, "image/png"));
-      const data = new Uint8Array(await blob.arrayBuffer());
-      const displayHeight = Math.max(1, Math.round(A4_W_PX * (sliceHeight / pageWidthPx)));
-
-      children.push(new Paragraph({
-        spacing: { after: 0 },
-        children: [new ImageRun({ data, transformation: { width: A4_W_PX, height: Math.min(displayHeight, A4_H_PX) } })],
-      }));
-      if (i < totalPages - 1) children.push(new Paragraph({ children: [new PageBreak()] }));
-    }
-
-    const doc = new Document({
-      sections: [{
-        properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 0, bottom: 0, left: 0, right: 0 } } },
-        children,
-      }],
-    });
-
-    const blob = await Packer.toBlob(doc);
-    const dateLabel = dateLabelOf(match.date);
-    const rivalLabel = sanitizeFileName(match.rivalName) || "rival";
-    const fileName = `${sanitizeFileName(teamName) || "equipo"}_${dateLabel}_vs_${rivalLabel}_informe.docx`;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = fileName;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-  } finally {
-    document.body.removeChild(container);
+// Abre el informe en una pestaña nueva del navegador -- el mismo diseño de
+// siempre (fotos, cronología, gráficos), como página completa en vez de
+// forzar el diálogo de imprimir sobre la propia app. Desde esa pestaña, el
+// botón "Imprimir / Guardar como PDF" usa el diálogo de impresión del
+// navegador si hace falta un PDF -- pero no se abre solo.
+//
+// `reportWindow` se recibe ya abierta (con window.open) desde el mismo
+// gesto del toque en "Generar informe": si se abriera aquí dentro, después
+// de guardar los datos del formulario, algunos navegadores (sobre todo en
+// iPad) la bloquearían como ventana emergente por no venir ya de un toque
+// directo.
+function openMatchReportTab(match, teamName, rosterPlayers, teamCrest, reportWindow) {
+  if (!reportWindow) return false;
+  const bodyHtml = buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest);
+  const esc = (v) => String(v === undefined || v === null ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const dateLabel = new Date(match.date).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" });
+  const title = `${esc(teamName || "Equipo")} vs ${esc(match.rivalName || "Rival")} — ${esc(dateLabel)}`;
+  const doc = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Informe · ${title}</title>
+<style>
+  body { margin: 0; background: #f2f2f2; }
+  .report-toolbar {
+    position: sticky; top: 0; z-index: 10; background: #1a1a1a; color: #fff;
+    padding: 10px 16px; display: flex; justify-content: space-between; align-items: center;
+    gap: 12px; font-family: Arial, Helvetica, sans-serif; font-size: 13px;
   }
+  .report-toolbar button {
+    background: #C0202E; color: #fff; border: none; border-radius: 6px;
+    padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer; flex-shrink: 0;
+  }
+  @media print { .report-toolbar { display: none; } body { background: #fff; } }
+</style>
+</head>
+<body>
+  <div class="report-toolbar">
+    <span>${title}</span>
+    <button onclick="window.print()">Imprimir / Guardar como PDF</button>
+  </div>
+  ${bodyHtml}
+</body>
+</html>`;
+  reportWindow.document.open();
+  reportWindow.document.write(doc);
+  reportWindow.document.close();
+  return true;
 }
 
 /* Avatars ------------------------------------------------------------ */
@@ -1248,8 +1222,8 @@ export default function App() {
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [confirmDeleteMatch, setConfirmDeleteMatch] = useState(null); // partido guardado a punto de borrarse
   const [reportMetaFor, setReportMetaFor] = useState(null); // partido guardado para el que se están pidiendo los datos del informe
-  const [reportBusy, setReportBusy] = useState(false); // generando el .docx
   const [editingGoal, setEditingGoal] = useState(null); // gol del partido en curso que se está corrigiendo
+  const [editingSavedGoal, setEditingSavedGoal] = useState(null); // { match, event } de un partido ya guardado, en el Historial
   const [pendingAction, setPendingAction] = useState(null); // { key, label } | null
   const [actionsPopoverOpen, setActionsPopoverOpen] = useState(false);
   const [cardsPopoverOpen, setCardsPopoverOpen] = useState(false);
@@ -1668,22 +1642,13 @@ export default function App() {
   // Guarda los datos de cabecera del informe (ciudad, pabellón, competición,
   // horas, observaciones, rival) en el propio partido guardado -- así, si se
   // vuelve a generar más adelante, no hay que volver a rellenarlos -- y
-  // entonces genera el .docx.
-  const generateReport = async (patch) => {
+  // entonces abre el informe en su propia pestaña.
+  const generateReport = (patch, reportWindow) => {
     const updated = { ...reportMetaFor, ...patch };
-    setReportBusy(true);
-    try { await storage.set(`matches:${activeTeamId}:${updated.date}`, JSON.stringify(updated)); } catch (e) {}
+    const opened = openMatchReportTab(updated, activeTeam.name, players, activeTeam.crest, reportWindow);
+    if (!opened) showToast("El navegador ha bloqueado la pestaña — permite ventanas emergentes para este sitio");
+    storage.set(`matches:${activeTeamId}:${updated.date}`, JSON.stringify(updated)).catch(() => {});
     loadHistoryFor(activeTeamId);
-    try {
-      await generateMatchReportDocx(updated, activeTeam.name, players, activeTeam.crest);
-    } catch (e) {
-      showToast("No se pudo generar el informe");
-    }
-    // El modal se queda abierto (con el botón en "Generando…") hasta que el
-    // .docx está listo -- si se cerrara antes, el toque en "Generar informe"
-    // parecería no haber hecho nada durante los segundos que tarda rasterizar
-    // el informe y montar el archivo.
-    setReportBusy(false);
     setReportMetaFor(null);
   };
 
@@ -1962,7 +1927,7 @@ export default function App() {
   // que ya hacían los goles — de ahí sale la sección "Faltas y tarjetas" del
   // resumen y del historial. El resto de acciones (tiros, pérdidas...) solo
   // suman al contador, sin generar ese registro.
-  const bump = (playerId, key, delta = 1, targetHalf = null) => {
+  const bump = (playerId, key, delta = 1, targetHalf = null, zone = null) => {
     const h = targetHalf || halfRef.current;
     setStatsByHalf((prev) => {
       const halfMap = { ...(prev[h] || {}) };
@@ -1978,7 +1943,7 @@ export default function App() {
       const ev = {
         id: `disc-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         playerId, playerName: player ? player.name : "?", playerNumber: player ? player.number : "?",
-        type: key, half: h, remaining: remainingNow,
+        type: key, half: h, remaining: remainingNow, zone,
       };
       discId = ev.id;
       setDisciplineEvents((prev) => [...prev, ev]);
@@ -2096,6 +2061,37 @@ export default function App() {
     saveDraftNow();
   };
 
+  // Lo mismo que saveGoalEdit, pero para un gol de un partido que ya está
+  // guardado en el Historial: en vez de bump() sobre el estado en vivo,
+  // ajusta directamente los goles del jugador en las filas guardadas (total
+  // y la parte en que se marcó) y persiste el partido entero.
+  const saveSavedGoalEdit = async (patch) => {
+    if (!editingSavedGoal) return;
+    const { match, event } = editingSavedGoal;
+    const rosterMatch = (row, playerId) => {
+      if (row.id) return row.id === playerId;
+      const rp = players.find((p) => p.id === playerId);
+      return rp ? row.name === rp.name && String(row.number) === String(rp.number) : false;
+    };
+    const adjustGoals = (rows, playerId, delta) => rows.map((p) => (rosterMatch(p, playerId) ? { ...p, goals: Math.max(0, (p.goals || 0) + delta) } : p));
+    let matchPlayers = match.players;
+    let halvesArr = Array.isArray(match.halves) ? match.halves : [];
+    if (event.type === "for" && patch.authorId && patch.authorId !== event.authorId) {
+      if (event.authorId) {
+        matchPlayers = adjustGoals(matchPlayers, event.authorId, -1);
+        halvesArr = halvesArr.map((h) => (h.half === event.half ? { ...h, players: adjustGoals(h.players, event.authorId, -1) } : h));
+      }
+      matchPlayers = adjustGoals(matchPlayers, patch.authorId, 1);
+      halvesArr = halvesArr.map((h) => (h.half === event.half ? { ...h, players: adjustGoals(h.players, patch.authorId, 1) } : h));
+    }
+    const goalEvents = (match.goalEvents || []).map((e) => (e.id === event.id ? { ...e, ...patch } : e));
+    const updated = { ...match, players: matchPlayers, halves: halvesArr, goalEvents };
+    try { await storage.set(`matches:${activeTeamId}:${updated.date}`, JSON.stringify(updated)); } catch (e) {}
+    setEditingSavedGoal(null);
+    showToast("Gol editado");
+    loadHistoryFor(activeTeamId);
+  };
+
   const armStatAction = (key, label) => {
     setActionsPopoverOpen(false);
     if (key === "saves") {
@@ -2125,16 +2121,21 @@ export default function App() {
   const finalizeZonedAction = (zoneKey) => {
     if (!zonedActionWizard || !zonedActionWizard.playerId) return;
     const { key, label, playerId, playerName } = zonedActionWizard;
-    bump(playerId, key, 1);
-    const player = players.find((p) => p.id === playerId);
-    const remainingNow = Math.max(0, halfMinutesFor(half, halfLength) * 60 - seconds);
-    const ev = {
-      id: `zone-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      playerId, playerName,
-      playerNumber: player ? player.number : "?",
-      key, zone: zoneKey, half, remaining: remainingNow,
-    };
-    setZonedEvents((prev) => [...prev, ev]);
+    bump(playerId, key, 1, null, zoneKey);
+    // Las faltas ya quedan registradas (con zona y minuto) en disciplineEvents
+    // via bump -- no hace falta duplicarlas aquí también, o saldrían dos
+    // veces en el resumen y en el Excel.
+    if (!DISCIPLINE_KEYS.has(key)) {
+      const player = players.find((p) => p.id === playerId);
+      const remainingNow = Math.max(0, halfMinutesFor(half, halfLength) * 60 - seconds);
+      const ev = {
+        id: `zone-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        playerId, playerName,
+        playerNumber: player ? player.number : "?",
+        key, zone: zoneKey, half, remaining: remainingNow,
+      };
+      setZonedEvents((prev) => [...prev, ev]);
+    }
     showToast(`${label} — ${playerName} · ${PITCH_ZONE_LABEL[zoneKey]}`);
     setZonedActionWizard(null);
     saveDraftNow();
@@ -2614,6 +2615,7 @@ export default function App() {
             onExport={() => exportClubDataToExcel(savedMatches, savedTrainings, activeTeam.name)}
             onDeleteMatch={setConfirmDeleteMatch}
             onCreateReport={setReportMetaFor}
+            onEditGoal={(match, event) => setEditingSavedGoal({ match, event })}
           />
         )}
       </div>
@@ -2717,6 +2719,10 @@ export default function App() {
         <GoalEditModal event={editingGoal} players={sortedPlayers} onSave={saveGoalEdit} onClose={() => setEditingGoal(null)} />
       )}
 
+      {editingSavedGoal && (
+        <GoalEditModal event={editingSavedGoal.event} players={players} onSave={saveSavedGoalEdit} onClose={() => setEditingSavedGoal(null)} />
+      )}
+
       {teamManagerOpen && (
         <TeamManagerModal
           teams={teams} activeTeamId={activeTeamId}
@@ -2780,7 +2786,7 @@ export default function App() {
       )}
 
       {reportMetaFor && (
-        <ReportMetaModal match={reportMetaFor} busy={reportBusy} onClose={() => setReportMetaFor(null)} onGenerate={generateReport} />
+        <ReportMetaModal match={reportMetaFor} onClose={() => setReportMetaFor(null)} onGenerate={generateReport} />
       )}
 
       {confirmEndTraining && (
@@ -3446,7 +3452,7 @@ const PITCH_MATERIAL_SUGGESTIONS = ["Parquet", "Cemento pulido", "PVC deportivo"
 // observaciones) más el rival "por si acaso" hay que corregirlo a toro
 // pasado. Se guardan en el propio partido para no volver a pedirlos si se
 // regenera el informe más adelante.
-function ReportMetaModal({ match, onGenerate, onClose, busy }) {
+function ReportMetaModal({ match, onGenerate, onClose }) {
   const [city, setCity] = useState(match.city || "");
   const [venue, setVenue] = useState(match.venue || "");
   const [pitchMaterial, setPitchMaterial] = useState(match.pitchMaterial || "");
@@ -3467,11 +3473,11 @@ function ReportMetaModal({ match, onGenerate, onClose, busy }) {
   const Field = ({ label, children }) => <div style={{ marginBottom: 12 }}><label style={labelStyle}>{label}</label>{children}</div>;
 
   return (
-    <div style={overlayStyle} onClick={busy ? undefined : onClose}>
+    <div style={overlayStyle} onClick={onClose}>
       <div style={{ ...modalCard, maxWidth: 480, maxHeight: "86vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()} className="fadein">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <div className="oswald" style={{ fontSize: 17, fontWeight: 600 }}>Crear informe</div>
-          {!busy && <button onClick={onClose} style={iconBtnSm}><X size={16} /></button>}
+          <button onClick={onClose} style={iconBtnSm}><X size={16} /></button>
         </div>
         <div style={{ fontSize: 11, color: T.dim, margin: "6px 0 14px" }}>
           Datos para la cabecera del informe — quedan guardados en este partido para la próxima vez.
@@ -3510,11 +3516,16 @@ function ReportMetaModal({ match, onGenerate, onClose, busy }) {
         </Field>
 
         <button
-          disabled={busy}
-          onClick={() => onGenerate({ city, venue, pitchMaterial, rivalName, rivalCrest, startTime, endTime, competition, observations })}
-          style={{ ...bigBtn, justifyContent: "center", width: "100%", background: busy ? T.surface3 : T.red, color: busy ? T.dim : "#0A0A0A", marginTop: 6, cursor: busy ? "default" : "pointer" }}
+          onClick={() => {
+            // La pestaña se abre aquí mismo, en el mismo gesto del toque —
+            // si se abriera después de esperar a un await, algunos
+            // navegadores (sobre todo en iPad) la bloquean como emergente.
+            const reportWindow = window.open("", "_blank");
+            onGenerate({ city, venue, pitchMaterial, rivalName, rivalCrest, startTime, endTime, competition, observations }, reportWindow);
+          }}
+          style={{ ...bigBtn, justifyContent: "center", width: "100%", background: T.red, color: "#0A0A0A", marginTop: 6 }}
         >
-          {busy ? "Generando…" : <><ClipboardList size={15} /> Generar informe</>}
+          <ClipboardList size={15} /> Generar informe
         </button>
       </div>
     </div>
@@ -3535,6 +3546,7 @@ function DisciplineSection({ events }) {
             <span>
               <span style={{ fontWeight: 700, color: DISCIPLINE_COLOR[ev.type] || T.text }}>{DISCIPLINE_LABEL[ev.type] || ev.type}</span>
               {" · "}#{ev.playerNumber} {ev.playerName}
+              {ev.zone ? ` · ${PITCH_ZONE_LABEL[ev.zone] || ev.zone}` : ""}
             </span>
             <span style={{ color: T.dim, flexShrink: 0 }}>{halfLabel(ev.half)} · {fmtClock(ev.remaining)}</span>
           </div>
@@ -4089,7 +4101,7 @@ function RosterEditor({ players, onAdd, onRemove, onSave, onNewFile, onReframe }
   );
 }
 
-function HistoryView({ matches, trainings, teamName, teamCrest, rosterPlayers, subTab, onSubTabChange, onExport, onDeleteMatch, onCreateReport }) {
+function HistoryView({ matches, trainings, teamName, teamCrest, rosterPlayers, subTab, onSubTabChange, onExport, onDeleteMatch, onCreateReport, onEditGoal }) {
   const [open, setOpen] = useState(null);
   const total = matches.length + trainings.length;
   return (
@@ -4120,6 +4132,7 @@ function HistoryView({ matches, trainings, teamName, teamCrest, rosterPlayers, s
                 onToggle={() => setOpen(open === m.date ? null : m.date)}
                 onDelete={() => onDeleteMatch(m)}
                 onCreateReport={onCreateReport}
+                onEditGoal={(event) => onEditGoal(m, event)}
               />
             ))}
           </div>
@@ -4176,7 +4189,7 @@ function HistoryView({ matches, trainings, teamName, teamCrest, rosterPlayers, s
 
 /* Ficha de un partido ya guardado. Igual que el resumen en directo, deja ver
    cada parte por separado o el total, sin apilar tres tablas en pantalla. */
-function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, onToggle, onDelete, onCreateReport }) {
+function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, onToggle, onDelete, onCreateReport, onEditGoal }) {
   const halves = halvesOf(m);
   const [tab, setTab] = useState("total");
   const scoreOf = (h) => { const s = halfScore(m, h); return `${s.favor}-${s.contra}`; };
@@ -4261,10 +4274,17 @@ function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, 
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {goalsShown.map((ev) => (
                   <div key={ev.id} style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, padding: "6px 10px", fontSize: 11 }}>
-                    <span style={{ fontWeight: 700, color: ev.type === "for" ? T.red : T.negative }}>
-                      {ev.type === "for" ? `⚽ ${ev.authorName}` : "⚽ Rival"}
-                    </span>
-                    {" · "}{ev.phase} · {halfLabel(ev.half)} · {fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                      <div>
+                        <span style={{ fontWeight: 700, color: ev.type === "for" ? T.red : T.negative }}>
+                          {ev.type === "for" ? `⚽ ${ev.authorName}` : "⚽ Rival"}
+                        </span>
+                        {" · "}{ev.phase} · {halfLabel(ev.half)} · {fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}
+                      </div>
+                      <button onClick={() => onEditGoal(ev)} title="Editar este gol" style={{ ...iconBtnSm, width: 20, height: 20, flexShrink: 0 }}>
+                        <Settings size={11} />
+                      </button>
+                    </div>
                     <div style={{ color: T.dim, marginTop: 2 }}>En pista: {(ev.onCourt || []).map((p) => `#${p.number} ${p.name}`).join(", ")}</div>
                   </div>
                 ))}

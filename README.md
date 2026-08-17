@@ -187,23 +187,27 @@ minuto exacto en que se marcaron — se ven en **Resumen** (durante el partido)
 y en la ficha de cada partido del **Historial**, en la sección «Faltas y
 tarjetas».
 
-Un gol ya registrado se puede corregir desde **Resumen**: el icono de
-engranaje junto a cada gol deja cambiar quién marcó y de qué fase vino. Los
-minutos y el quinteto en pista no se tocan, solo el autor y la fase.
+Un gol ya registrado se puede corregir: el icono de engranaje junto a cada
+gol deja cambiar quién marcó y de qué fase vino. Los minutos y el quinteto en
+pista no se tocan, solo el autor y la fase. Funciona igual durante el
+partido (en **Resumen**) que después, con el partido ya guardado (en la
+ficha de cada partido del **Historial**) — ajustando los goles del jugador
+correspondiente en ese partido guardado.
 
 Un partido guardado se puede borrar desde el **Historial**, con confirmación.
 No se puede deshacer.
 
-### Pérdidas, recuperaciones y tiros por zona
+### Pérdidas, recuperaciones, tiros y faltas por zona
 
-Al anotar una pérdida, una recuperación o un tiro (a puerta o fuera) desde
-**Acciones**, después de elegir al jugador se abre un campo de fútbol sala
-dibujado con nueve zonas — vuestra portería siempre abajo, la rival arriba.
-Se toca la zona donde ocurrió y queda registrado con jugador, zona y minuto.
-Se ve en Resumen, en el Historial y en la exportación a Excel (hoja
-«Zonas»).
+Al anotar una pérdida, una recuperación, un tiro (a puerta o fuera) o una
+falta (cometida o recibida) desde **Acciones**, después de elegir al jugador
+se abre un campo de fútbol sala dibujado con nueve zonas — vuestra portería
+siempre abajo, la rival arriba. Se toca la zona donde ocurrió y queda
+registrado con jugador, zona y minuto. Se ve en Resumen, en el Historial y en
+la exportación a Excel (hojas «Zonas» y, para las faltas, también «Faltas y
+tarjetas»).
 
-### Informe en Word (.docx)
+### Informe
 
 El botón **Crear informe**, en cualquier partido del Historial, primero pide
 los datos de cabecera que no se registran durante el partido en vivo: ciudad,
@@ -213,20 +217,19 @@ corregirlo), hora de inicio y de fin, competición o naturaleza del partido
 guardados en el propio partido, así que si se vuelve a generar el informe más
 adelante ya salen rellenos.
 
-Con eso genera un **.docx** completo, con foto de cada jugador: minutos y
-rotaciones agrupados por posición, los goles de cada parte con el quinteto en
-pista, una cronología en línea de tiempo, faltas y tarjetas, tiros (con
-gráfico por jugador y de proporción a puerta/fuera/gol), goles según quién
-estaba en pista, quiénes coincidieron más tiempo juntos (parejas, tríos y
-cuartetos) y una ficha por jugador — el mismo diseño visual de siempre,
-convertido en páginas de una página de Word, listas para exportar a PDF desde
-ahí o desde cualquier impresora virtual. No queda texto seleccionable (son
-páginas rasterizadas para que las gráficas y el diseño salgan siempre
-idénticos), pero se genera entero sin conexión.
+Con eso abre el informe completo en una **pestaña nueva** del navegador, con
+foto de cada jugador: minutos y rotaciones agrupados por posición, los goles
+de cada parte con el quinteto en pista, una cronología en línea de tiempo,
+faltas y tarjetas, tiros (con gráfico por jugador y de proporción a
+puerta/fuera/gol), goles según quién estaba en pista, quiénes coincidieron
+más tiempo juntos (parejas, tríos y cuartetos) y una ficha por jugador. Desde
+esa pestaña, el botón *Imprimir / Guardar como PDF* usa el diálogo de
+impresión del navegador si hace falta un PDF — pero no se abre solo, para no
+interrumpir con eso justo al pulsar *Crear informe*.
 
-No se genera solo al finalizar el partido — a propósito, para no interrumpir
-justo entonces. Se genera cuando se pulsa el botón, y puede tardar unos
-segundos (el botón muestra «Generando…» mientras tanto).
+Se genera entero sin conexión y sin depender de ninguna librería externa: es
+el mismo HTML que ya se construye para el informe, mostrado en su propia
+pestaña en vez de sobre la propia app.
 
 ### Detalles que conviene conocer
 
@@ -238,5 +241,6 @@ segundos (el botón muestra «Generando…» mientras tanto).
   abrir ofrece retomarlo.
 - **Editar la convocatoria a mitad de partido** solo cambia la lista de
   convocados; no toca minutos, goles ni tarjetas.
-- **El informe** se descarga como archivo .docx, sin necesidad de conexión —
-  y solo al pulsar *Crear informe*, nunca automáticamente.
+- **El informe** se abre en una pestaña nueva, sin necesidad de conexión — y
+  solo al pulsar *Crear informe*, nunca automáticamente. Si el navegador la
+  bloquea como ventana emergente, hay que permitirlas para este sitio.
