@@ -78,6 +78,14 @@ function halvesPresent(statsByHalf, goalEvents) {
 
 const halfLabel = (h) => (h <= 2 ? `${h}ª parte` : `Prórroga ${h - 2}`);
 
+// El fútbol sala solo tiene 2 partes reglamentarias. La prórroga (solo en
+// partidos de eliminatoria, nunca en liga) son 2 partes fijas de 3 minutos
+// cada una, independientes de la duración configurada para el partido.
+const OT_HALF_MIN = 3;
+const MAX_HALVES = 4; // 2 partes + 2 prórrogas; a partir de ahí, penaltis (fuera de la app)
+const halfMinutesFor = (h, baseHalfLength) => (h <= 2 ? baseHalfLength : OT_HALF_MIN);
+const halfShortLabel = (h) => (h <= 2 ? `${h}ª` : `P${h - 2}`);
+
 // Agrupa las rotaciones (cada entrada y salida de la pista) primero por
 // jugador y dentro de cada jugador por parte — así es como se lee en el
 // resumen y en las exportaciones: la ficha de un jugador, parte a parte.
@@ -292,6 +300,18 @@ function halfScore(match, half) {
    y entonces estas funciones simplemente no generan las hojas por parte. */
 const halvesOf = (match) => (Array.isArray(match.halves) ? match.halves : []);
 
+// Qué partes tiene realmente un partido guardado — 1ª y 2ª siempre, más las
+// prórrogas que se hayan jugado, mirando cualquier rastro que hayan dejado
+// (desglose por parte, goles, faltas o pérdidas/tiros).
+function matchHalvesPresent(match) {
+  const set = new Set([1, 2]);
+  halvesOf(match).forEach((h) => set.add(Number(h.half)));
+  (match.goalEvents || []).forEach((e) => set.add(Number(e.half) || 1));
+  (match.disciplineEvents || []).forEach((e) => set.add(Number(e.half) || 1));
+  (match.zonedEvents || []).forEach((e) => set.add(Number(e.half) || 1));
+  return [...set].filter((h) => h > 0).sort((a, b) => a - b);
+}
+
 // Filas para la hoja de Excel de rotaciones: jugador por jugador, cada
 // entrada/salida de la parte que le corresponde, y el acumulado de esa parte
 // y el total al cierre de cada bloque. Los partidos guardados antes de que
@@ -408,6 +428,7 @@ function exportClubDataToExcel(matches, trainings, teamName) {
   if (matches.length) {
     const summaryRows = matches.map((m) => {
       const h1 = halfScore(m, 1), h2 = halfScore(m, 2);
+      const otHalves = matchHalvesPresent(m).filter((h) => h > 2);
       return {
         Fecha: new Date(m.date).toLocaleDateString("es-ES"),
         Hora: m.startTime || "",
@@ -417,6 +438,7 @@ function exportClubDataToExcel(matches, trainings, teamName) {
         "Goles rival": m.rivalScore,
         "1ª parte": `${h1.favor}-${h1.contra}`,
         "2ª parte": `${h2.favor}-${h2.contra}`,
+        ...(otHalves.length ? { "Prórroga": otHalves.map((h) => { const sc = halfScore(m, h); return `${sc.favor}-${sc.contra}`; }).join(" / ") } : {}),
         "Ocasiones a favor": m.occFor,
         "Ocasiones en contra": m.occAgainst,
         "Duración parte (min)": m.halfLength,
@@ -476,6 +498,7 @@ function exportClubDataToExcel(matches, trainings, teamName) {
 function exportSingleMatchToExcel(match, teamName) {
   const wb = XLSX.utils.book_new();
   const h1 = halfScore(match, 1), h2 = halfScore(match, 2);
+  const otHalves = matchHalvesPresent(match).filter((h) => h > 2);
   const summary = [{
     Fecha: new Date(match.date).toLocaleDateString("es-ES"),
     Hora: match.startTime || "",
@@ -485,6 +508,7 @@ function exportSingleMatchToExcel(match, teamName) {
     "Goles rival": match.rivalScore,
     "1ª parte": `${h1.favor}-${h1.contra}`,
     "2ª parte": `${h2.favor}-${h2.contra}`,
+    ...(otHalves.length ? { "Prórroga": otHalves.map((h) => { const sc = halfScore(match, h); return `${sc.favor}-${sc.contra}`; }).join(" / ") } : {}),
     "Ocasiones a favor": match.occFor,
     "Ocasiones en contra": match.occAgainst,
     "Duración parte (min)": match.halfLength,
@@ -524,15 +548,17 @@ function exportSingleMatchToExcel(match, teamName) {
 const POS_GROUP_COLOR = { POR: "#E0A030", CIE: "#2E9BD6", ALA: "#27AE60", PIV: "#9B59B6" };
 const POS_GROUP_ICON = { POR: "🧤", CIE: "🛡", ALA: "🪽", PIV: "🎯" };
 
-// No hay librería de PDF empaquetada, así que esto monta un informe listo para
-// imprimir y abre el diálogo del navegador — eligiendo "Guardar como PDF" ahí
-// sale el PDF. Funciona igual sin conexión, porque no descarga nada.
+// Monta el HTML del informe (mismo diseño de siempre: cabecera, minutos,
+// goles, cronología, faltas, tiros, presencia en pista, fichas). Es una
+// función pura -- no toca el DOM -- para poder tanto mostrarlo como
+// rasterizarlo a páginas de un .docx en generateMatchReportDocx, más abajo.
 //
 // `rosterPlayers` es la plantilla ACTUAL (con fotos) — se cruza con los datos
 // guardados del partido para poder ilustrarlo, ya que las fotos no se
 // guardan dentro del propio partido. `teamCrest` es el escudo del equipo.
-function printMatchReport(match, teamName, rosterPlayers, teamCrest) {
+function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const dateStr = new Date(match.date).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" });
+  const presentHalves = matchHalvesPresent(match);
 
   // Los nombres los escribe el usuario: un "<" en el nombre de un jugador o de
   // un rival rompia el informe entero al inyectarse crudo en el HTML.
@@ -568,11 +594,12 @@ function printMatchReport(match, teamName, rosterPlayers, teamCrest) {
   /* ---- Minutos y rotaciones, agrupado por posición ---- */
   const minutesRow = (row) => {
     const g = rotFor(row);
-    const halvesHtml = [1, 2].map((half) => {
+    const halvesHtml = presentHalves.map((half) => {
       const h = g && g.halves.get(half);
       if (!h) return `<div style="min-width:64px; color:#ccc; font-size:10px;">—</div>`;
       const chips = h.list.map((r) => `<span>${fmtClock(r.startRemaining)}→${fmtClock(r.endRemaining)} <b style="color:#333;">${fmtMin(r.durationSeconds)}</b></span>`).join(" · ");
       return `<div style="min-width:100px;">
+          <div style="font-size:7px; color:#999; text-transform:uppercase;">${esc(halfLabel(half))}</div>
           <div style="display:inline-block; background:#1a1a1a; color:#fff; font-size:10px; font-weight:700; border-radius:5px; padding:2px 7px; margin-bottom:2px;">${fmtMin(h.total)}</div>
           <div style="line-height:1.5; font-size:8px; color:#666;">${chips}</div>
         </div>`;
@@ -625,7 +652,7 @@ function printMatchReport(match, teamName, rosterPlayers, teamCrest) {
   };
 
   const goals = match.goalEvents || [];
-  const goalsByHalfHtml = [1, 2].filter((h) => goals.some((g) => g.half === h)).map((h) => {
+  const goalsByHalfHtml = presentHalves.filter((h) => goals.some((g) => g.half === h)).map((h) => {
     const sc = halfScore(match, h);
     return `<div>
         <div style="font-size:10px; font-weight:800; color:#888; text-transform:uppercase; margin-bottom:6px;">${esc(halfLabel(h))} <span style="color:#111;">${sc.favor}-${sc.contra}</span></div>
@@ -636,13 +663,17 @@ function printMatchReport(match, teamName, rosterPlayers, teamCrest) {
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">${goalsByHalfHtml}</div>`;
 
   /* ---- Cronología: los goles como puntos en una línea de tiempo ---- */
-  const totalMin = Math.max(1, match.halfLength * 2);
+  // Cada parte puede durar algo distinto (la prórroga son 3 min fijos), así
+  // que el minuto absoluto de un gol se calcula sumando la duración real de
+  // las partes que la preceden, no multiplicando por una duración única.
+  const startOfHalfMin = (h) => presentHalves.filter((x) => x < h).reduce((s, x) => s + halfMinutesFor(x, match.halfLength), 0);
+  const totalMin = Math.max(1, presentHalves.reduce((s, h) => s + halfMinutesFor(h, match.halfLength), 0));
   const timelineHtml = !goals.length ? "" : (() => {
     const W = 720, H = 130, pad = 30;
     const minToX = (min) => pad + (min / totalMin) * (W - pad * 2);
     const points = goals.map((ev) => {
-      const elapsedInHalf = Math.max(0, match.halfLength * 60 - (ev.remaining !== undefined ? ev.remaining : 0));
-      const minuteAbs = (ev.half - 1) * match.halfLength + elapsedInHalf / 60;
+      const elapsedInHalf = Math.max(0, halfMinutesFor(ev.half, match.halfLength) * 60 - (ev.remaining !== undefined ? ev.remaining : 0));
+      const minuteAbs = startOfHalfMin(ev.half) + elapsedInHalf / 60;
       return { ev, minute: Math.max(0, Math.min(totalMin, minuteAbs)) };
     }).sort((a, b) => a.minute - b.minute);
     const dotsHtml = points.map((pt, i) => {
@@ -658,11 +689,15 @@ function printMatchReport(match, teamName, rosterPlayers, teamCrest) {
         <text x="${x}" y="${labelY}" text-anchor="middle" font-size="8" font-weight="700" fill="#222">${esc(pt.ev.type === "for" ? (pt.ev.authorName || "") : "En contra")}</text>
         <text x="${x}" y="${timeY}" text-anchor="middle" font-size="7" fill="#888">${fmtMin(Math.round(pt.minute * 60))}</text>`;
     }).join("");
+    const breaksHtml = presentHalves.slice(1).map((h) => {
+      const x = minToX(startOfHalfMin(h));
+      return `<circle cx="${x}" cy="${H / 2}" r="3" fill="#999" />
+        <text x="${x}" y="${H / 2 + 18}" text-anchor="middle" font-size="8" fill="#999">${esc(h > 2 ? "Prórroga" : "Descanso")}</text>`;
+    }).join("");
     return `${sectionTitle("⏱", "Cronología")}
       <svg viewBox="0 0 ${W} ${H}" style="width:100%; height:auto; display:block;">
         <line x1="${pad}" y1="${H / 2}" x2="${W - pad}" y2="${H / 2}" stroke="#ccc" stroke-width="1.5" />
-        <circle cx="${minToX(match.halfLength)}" cy="${H / 2}" r="3" fill="#999" />
-        <text x="${minToX(match.halfLength)}" y="${H / 2 + 18}" text-anchor="middle" font-size="8" fill="#999">Descanso</text>
+        ${breaksHtml}
         <text x="${pad}" y="${H - 6}" font-size="8" fill="#999">0'</text>
         <text x="${W - pad}" y="${H - 6}" text-anchor="end" font-size="8" fill="#999">${totalMin}'</text>
         ${dotsHtml}
@@ -686,8 +721,8 @@ function printMatchReport(match, teamName, rosterPlayers, teamCrest) {
         <span style="flex:1; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(d.name)}</span>
         ${d.fouls ? `<span style="color:#C0202E; font-weight:700;">↩ ${d.fouls}</span>` : ""}
         ${d.foulsReceived ? `<span style="color:#1a8f5e; font-weight:700;">↩ ${d.foulsReceived}</span>` : ""}
-        ${d.yellowHalves.map((h) => `<span style="background:#E3B23C; color:#fff; border-radius:3px; padding:1px 5px; font-weight:700; font-size:8px;">${h}ª</span>`).join("")}
-        ${d.redHalves.map((h) => `<span style="background:#8B2635; color:#fff; border-radius:3px; padding:1px 5px; font-weight:700; font-size:8px;">${h}ª</span>`).join("")}
+        ${d.yellowHalves.map((h) => `<span style="background:#E3B23C; color:#fff; border-radius:3px; padding:1px 5px; font-weight:700; font-size:8px;">${halfShortLabel(h)}</span>`).join("")}
+        ${d.redHalves.map((h) => `<span style="background:#8B2635; color:#fff; border-radius:3px; padding:1px 5px; font-weight:700; font-size:8px;">${halfShortLabel(h)}</span>`).join("")}
       </div>`).join("");
 
   const totalRecoveries = squadRows.reduce((s, p) => s + (p.recoveries || 0), 0);
@@ -813,7 +848,7 @@ function printMatchReport(match, teamName, rosterPlayers, teamCrest) {
   const statChip = (icon, val, color) => val ? `<span style="color:${color}; font-weight:700; margin-right:6px;">${icon} ${val}</span>` : "";
   const fichaCard = (row) => {
     const g = rotFor(row);
-    const halvesHtml = [1, 2].map((half) => {
+    const halvesHtml = presentHalves.map((half) => {
       const h = g && g.halves.get(half);
       if (!h) return "";
       const chips = h.list.map((r) => `${fmtClock(r.startRemaining)}→${fmtClock(r.endRemaining)} <b>${fmtMin(r.durationSeconds)}</b>`).join(" · ");
@@ -836,10 +871,17 @@ function printMatchReport(match, teamName, rosterPlayers, teamCrest) {
   };
   const fichasHtml = byPosition(fichaCard);
 
-  const sc1 = halfScore(match, 1), sc2 = halfScore(match, 2);
+  const halvesScoreLine = presentHalves.map((h) => { const sc = halfScore(match, h); return `${esc(halfLabel(h))}: ${sc.favor}-${sc.contra}`; }).join(" · ");
+
+  // Datos de cabecera que se piden al pulsar "Crear informe" (ciudad, hora de
+  // fin, material de la pista, competición) — opcionales, así que solo entran
+  // en la línea si de verdad se rellenaron.
+  const hours = match.startTime || match.endTime ? `${esc(match.startTime || "?")}–${esc(match.endTime || "?")}` : null;
+  const metaLine = [dateStr, hours, match.city, match.venue, match.pitchMaterial, match.competition]
+    .filter(Boolean).map(esc).join(" · ");
 
   const headerHtml = `
-    <div style="background: linear-gradient(120deg, #7A1620, #E63946); border-radius: 12px; padding: 14px 18px; display:flex; justify-content:space-between; align-items:center; color:#fff; margin-bottom: 16px;">
+    <div style="background: linear-gradient(120deg, #7A1620, #E63946); border-radius: 12px; padding: 14px 18px; display:flex; justify-content:space-between; align-items:center; color:#fff; margin-bottom: 10px;">
       <div style="display:flex; align-items:center; gap:10px;">
         <div style="width:44px; height:44px; border-radius:9px; background:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0;">
           ${teamCrest ? `<img src="${teamCrest}" style="width:100%; height:100%; object-fit:cover;" />` : `<span style="font-size:18px;">🛡</span>`}
@@ -850,21 +892,23 @@ function printMatchReport(match, teamName, rosterPlayers, teamCrest) {
         </div>
       </div>
       <div style="text-align:right;">
-        <div style="font-size:8px; letter-spacing:0.8px; opacity:0.85; text-transform:uppercase;">${esc(dateStr)}${match.startTime ? " · " + esc(match.startTime) : ""}${match.venue ? " · " + esc(match.venue) : ""}</div>
-        <div style="display:flex; align-items:center; gap:8px; justify-content:flex-end; margin-top:4px;">
+        <div style="display:flex; align-items:center; gap:8px; justify-content:flex-end;">
           <span style="font-size:14px; font-weight:700;">${esc(teamName || "Equipo")}</span>
           <span style="background:#fff; color:#111; border-radius:8px; padding:3px 12px; font-size:16px; font-weight:800;">${esc(match.teamGoals)} - ${esc(match.rivalScore)}</span>
           <span style="font-size:14px; font-weight:700;">${esc(match.rivalName || "Rival")}</span>
+          ${match.rivalCrest ? `<img src="${match.rivalCrest}" style="width:26px; height:26px; border-radius:6px; object-fit:cover; background:#fff;" />` : ""}
         </div>
       </div>
     </div>
+    <div style="font-size:9px; color:#888; letter-spacing:0.3px; margin-bottom:4px;">${metaLine}</div>
     <div style="font-size:10px; color:#666; margin-bottom:6px;">
-      1ª parte: ${sc1.favor}-${sc1.contra} · 2ª parte: ${sc2.favor}-${sc2.contra} ·
+      ${halvesScoreLine} ·
       Ocasiones a favor: ${esc(match.occFor)} · Ocasiones en contra: ${esc(match.occAgainst)} · Duración parte: ${esc(match.halfLength)} min
-    </div>`;
+    </div>
+    ${match.observations ? `<div style="background:#fff7e6; border:1px solid #f0dca0; border-radius:8px; padding:7px 12px; font-size:10px; color:#665; margin-bottom:10px;"><b style="color:#333;">Observaciones:</b> ${esc(match.observations)}</div>` : ""}`;
 
-  const html = `
-    <div style="font-family: Arial, Helvetica, sans-serif; color:#111; padding:22px; max-width:900px; margin:0 auto;">
+  return `
+    <div style="font-family: Arial, Helvetica, sans-serif; color:#111; padding:22px; max-width:900px; margin:0 auto; background:#fff;">
       ${headerHtml}
       ${sectionTitle("⏱", "Minutos y rotaciones")}
       ${minutesHtml}
@@ -876,30 +920,87 @@ function printMatchReport(match, teamName, rosterPlayers, teamCrest) {
       ${sectionTitle("👤", "Fichas de jugadores")}
       ${fichasHtml}
     </div>`;
+}
 
-  let container = document.getElementById("print-match-report");
-  if (!container) {
-    container = document.createElement("div");
-    container.id = "print-match-report";
-    document.body.appendChild(container);
-  }
+// Genera el informe como .docx (fácil de convertir a PDF desde Word o desde
+// cualquier impresora virtual), con exactamente el mismo diseño que ya
+// existía en pantalla: se renderiza el HTML de siempre fuera de la vista, se
+// rasteriza con html2canvas -- así los gráficos SVG (donut, cronología,
+// campo) y el grid/flexbox del diseño salen pixel a pixel iguales -- y esa
+// captura se trocea en páginas A4 que se insertan como imágenes en el .docx.
+// No queda texto seleccionable, pero es justo lo que se pidió: mismo
+// aspecto, fácil de pasar a PDF, sin depender de conexión para generarlo.
+async function generateMatchReportDocx(match, teamName, rosterPlayers, teamCrest) {
+  const [{ Document, Packer, ImageRun, Paragraph, PageBreak }, { default: html2canvas }] = await Promise.all([
+    import("docx"), import("html2canvas"),
+  ]);
+
+  const html = buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest);
+
+  const RENDER_WIDTH = 900; // px — el mismo max-width que ya usaba el informe en pantalla
+  const container = document.createElement("div");
+  container.style.cssText = `position:fixed; left:-10000px; top:0; width:${RENDER_WIDTH}px; background:#fff;`;
   container.innerHTML = html;
+  document.body.appendChild(container);
 
-  if (!document.getElementById("print-match-report-style")) {
-    const style = document.createElement("style");
-    style.id = "print-match-report-style";
-    style.innerHTML = `
-      @media screen { #print-match-report { display: none; } }
-      @media print {
-        body * { visibility: hidden !important; }
-        #print-match-report, #print-match-report * { visibility: visible !important; }
-        #print-match-report { position: absolute; top: 0; left: 0; width: 100%; }
-      }
-    `;
-    document.head.appendChild(style);
+  try {
+    // Las fotos y escudos son data URLs, pero <img> igualmente necesita un
+    // ciclo de carga/decodificado antes de que html2canvas pueda pintarlas.
+    const imgs = Array.from(container.querySelectorAll("img"));
+    await Promise.all(imgs.map((img) => (img.complete ? Promise.resolve() : new Promise((res) => { img.onload = res; img.onerror = res; }))));
+
+    const fullCanvas = await html2canvas(container, { scale: 2, backgroundColor: "#ffffff", useCORS: true, width: RENDER_WIDTH, windowWidth: RENDER_WIDTH });
+
+    // Se trocea la captura en páginas con la proporción de un A4 vertical, a
+    // la misma escala que el ancho capturado -- así cada página del .docx
+    // corresponde a un trozo real y nítido de la captura, no a una imagen
+    // gigante que Word tendría que encajar como pudiera.
+    const A4_RATIO = 297 / 210;
+    const pageWidthPx = fullCanvas.width;
+    const pageHeightPx = Math.round(pageWidthPx * A4_RATIO);
+    const totalPages = Math.max(1, Math.ceil(fullCanvas.height / pageHeightPx));
+    const A4_W_PX = 794, A4_H_PX = 1123; // A4 a 96dpi, el tamaño de página que se declara más abajo
+
+    const children = [];
+    for (let i = 0; i < totalPages; i++) {
+      const sliceHeight = Math.min(pageHeightPx, fullCanvas.height - i * pageHeightPx);
+      const sliceCanvas = document.createElement("canvas");
+      sliceCanvas.width = pageWidthPx;
+      sliceCanvas.height = sliceHeight;
+      const ctx = sliceCanvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, pageWidthPx, sliceHeight);
+      ctx.drawImage(fullCanvas, 0, i * pageHeightPx, pageWidthPx, sliceHeight, 0, 0, pageWidthPx, sliceHeight);
+      const blob = await new Promise((res) => sliceCanvas.toBlob(res, "image/png"));
+      const data = new Uint8Array(await blob.arrayBuffer());
+      const displayHeight = Math.max(1, Math.round(A4_W_PX * (sliceHeight / pageWidthPx)));
+
+      children.push(new Paragraph({
+        spacing: { after: 0 },
+        children: [new ImageRun({ data, transformation: { width: A4_W_PX, height: Math.min(displayHeight, A4_H_PX) } })],
+      }));
+      if (i < totalPages - 1) children.push(new Paragraph({ children: [new PageBreak()] }));
+    }
+
+    const doc = new Document({
+      sections: [{
+        properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 0, bottom: 0, left: 0, right: 0 } } },
+        children,
+      }],
+    });
+
+    const blob = await Packer.toBlob(doc);
+    const dateLabel = dateLabelOf(match.date);
+    const rivalLabel = sanitizeFileName(match.rivalName) || "rival";
+    const fileName = `${sanitizeFileName(teamName) || "equipo"}_${dateLabel}_vs_${rivalLabel}_informe.docx`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  } finally {
+    document.body.removeChild(container);
   }
-
-  setTimeout(() => { try { window.print(); } catch (e) {} }, 300);
 }
 
 /* Avatars ------------------------------------------------------------ */
@@ -1146,6 +1247,8 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [confirmDeleteMatch, setConfirmDeleteMatch] = useState(null); // partido guardado a punto de borrarse
+  const [reportMetaFor, setReportMetaFor] = useState(null); // partido guardado para el que se están pidiendo los datos del informe
+  const [reportBusy, setReportBusy] = useState(false); // generando el .docx
   const [editingGoal, setEditingGoal] = useState(null); // gol del partido en curso que se está corrigiendo
   const [pendingAction, setPendingAction] = useState(null); // { key, label } | null
   const [actionsPopoverOpen, setActionsPopoverOpen] = useState(false);
@@ -1562,6 +1665,28 @@ export default function App() {
     loadHistoryFor(activeTeamId);
   };
 
+  // Guarda los datos de cabecera del informe (ciudad, pabellón, competición,
+  // horas, observaciones, rival) en el propio partido guardado -- así, si se
+  // vuelve a generar más adelante, no hay que volver a rellenarlos -- y
+  // entonces genera el .docx.
+  const generateReport = async (patch) => {
+    const updated = { ...reportMetaFor, ...patch };
+    setReportBusy(true);
+    try { await storage.set(`matches:${activeTeamId}:${updated.date}`, JSON.stringify(updated)); } catch (e) {}
+    loadHistoryFor(activeTeamId);
+    try {
+      await generateMatchReportDocx(updated, activeTeam.name, players, activeTeam.crest);
+    } catch (e) {
+      showToast("No se pudo generar el informe");
+    }
+    // El modal se queda abierto (con el botón en "Generando…") hasta que el
+    // .docx está listo -- si se cerrara antes, el toque en "Generar informe"
+    // parecería no haber hecho nada durante los segundos que tarda rasterizar
+    // el informe y montar el archivo.
+    setReportBusy(false);
+    setReportMetaFor(null);
+  };
+
   const loadTrainingHistoryFor = useCallback(async (teamId) => {
     try {
       const list = await storage.list(`trainings:${teamId}:`);
@@ -1849,7 +1974,7 @@ export default function App() {
     let discId = null;
     if (DISCIPLINE_KEYS.has(key)) {
       const player = players.find((p) => p.id === playerId);
-      const remainingNow = Math.max(0, halfLenRef.current * 60 - secondsRef.current);
+      const remainingNow = Math.max(0, halfMinutesFor(h, halfLenRef.current) * 60 - secondsRef.current);
       const ev = {
         id: `disc-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         playerId, playerName: player ? player.name : "?", playerNumber: player ? player.number : "?",
@@ -1929,7 +2054,7 @@ export default function App() {
     const onCourtSnapshot = players
       .filter((p) => onCourt.includes(p.id))
       .map((p) => ({ id: p.id, name: p.name, number: p.number }));
-    const remainingAtGoal = Math.max(0, halfLength * 60 - seconds); // exactamente lo que marca el reloj ahora
+    const remainingAtGoal = Math.max(0, halfMinutesFor(half, halfLength) * 60 - seconds); // exactamente lo que marca el reloj ahora
     const event = {
       id: `g${Date.now()}`,
       type: goalWizard.type,
@@ -2002,7 +2127,7 @@ export default function App() {
     const { key, label, playerId, playerName } = zonedActionWizard;
     bump(playerId, key, 1);
     const player = players.find((p) => p.id === playerId);
-    const remainingNow = Math.max(0, halfLength * 60 - seconds);
+    const remainingNow = Math.max(0, halfMinutesFor(half, halfLength) * 60 - seconds);
     const ev = {
       id: `zone-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       playerId, playerName,
@@ -2209,7 +2334,7 @@ export default function App() {
   };
 
   const statP = statPlayer ? players.find((p) => p.id === statPlayer) : null;
-  const totalHalfSeconds = Math.max(1, halfLength * 60);
+  const totalHalfSeconds = Math.max(1, halfMinutesFor(half, halfLength) * 60);
   const remaining = Math.max(0, totalHalfSeconds - seconds);
   const halfProgress = remaining / totalHalfSeconds;
   const onCourtCount = onCourt.length;
@@ -2321,17 +2446,30 @@ export default function App() {
 
             {view !== "entrenamiento" && (
             <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <button onClick={startNextHalf} style={ghostBtn}><ChevronRight size={14} /> {half === 1 ? "Empezar 2ª parte" : `Empezar parte ${half + 1}`}</button>
+              {/* Solo 2 partes reglamentarias. La prórroga (2 partes fijas de 3 min,
+                  solo para partidos de eliminatoria) se activa cuando se agota el
+                  tiempo de la 2ª parte y no se ha pulsado Finalizar partido — en
+                  liga, con empate, se finaliza directamente sin tocar este botón. */}
+              {half === 1 && (
+                <button onClick={startNextHalf} style={ghostBtn}><ChevronRight size={14} /> Empezar 2ª parte</button>
+              )}
+              {half >= 2 && half < MAX_HALVES && remaining <= 0 && (
+                <button onClick={startNextHalf} style={{ ...ghostBtn, borderColor: T.red, color: T.red }}><ChevronRight size={14} /> Empezar {halfLabel(half + 1)} (3 min)</button>
+              )}
               <div style={{ width: 1, height: 26, background: T.line }} />
               <div style={{ display: "flex", gap: 10, flex: 1, minWidth: 260 }}>
                 <OccCounter label="Ocasión favor" value={occFor} color={T.red} onInc={() => setOccFor((v) => v + 1)} onDec={() => setOccFor((v) => Math.max(0, v - 1))} />
                 <OccCounter label="Ocasión contra" value={occAgainst} color={T.negative} onInc={() => setOccAgainst((v) => v + 1)} onDec={() => setOccAgainst((v) => Math.max(0, v - 1))} />
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: T.dim }}>
-                Duración
-                <input type="number" value={halfLength} onChange={(e) => setHalfLength(Math.max(1, Number(e.target.value) || 1))} style={{ width: 52, background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 6, color: T.text, padding: "3px 5px", fontSize: 14 }} />
-                min
-              </div>
+              {half <= 2 ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: T.dim }}>
+                  Duración
+                  <input type="number" value={halfLength} onChange={(e) => setHalfLength(Math.max(1, Number(e.target.value) || 1))} style={{ width: 52, background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 6, color: T.text, padding: "3px 5px", fontSize: 14 }} />
+                  min
+                </div>
+              ) : (
+                <div style={{ fontSize: 11, color: T.dim }}>Prórroga: 3 min fijos</div>
+              )}
             </div>
             )}
           </div>
@@ -2475,6 +2613,7 @@ export default function App() {
             subTab={historySubTab} onSubTabChange={setHistorySubTab}
             onExport={() => exportClubDataToExcel(savedMatches, savedTrainings, activeTeam.name)}
             onDeleteMatch={setConfirmDeleteMatch}
+            onCreateReport={setReportMetaFor}
           />
         )}
       </div>
@@ -2638,6 +2777,10 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {reportMetaFor && (
+        <ReportMetaModal match={reportMetaFor} busy={reportBusy} onClose={() => setReportMetaFor(null)} onGenerate={generateReport} />
       )}
 
       {confirmEndTraining && (
@@ -2840,7 +2983,7 @@ function DraftRecoveryModal({ drafts, teamName, onResumeMatch, onDiscardMatch, o
               {(teamName || "").split(" ")[0]} {Object.values(m.stats || {}).reduce((s, x) => s + (x.goals || 0), 0)} — {m.rivalScore || 0} {m.rivalName || ""}
             </div>
             <div style={{ fontSize: 11, color: T.dim, marginBottom: 12 }}>
-              {m.half}ª parte · {fmtClock(Math.max(0, (m.halfLength || 20) * 60 - (m.seconds || 0)))} por jugar
+              {halfLabel(m.half)} · {fmtClock(Math.max(0, halfMinutesFor(m.half, m.halfLength || 20) * 60 - (m.seconds || 0)))} por jugar
               {(m.goalEvents || []).length ? ` · ${m.goalEvents.length} gol${m.goalEvents.length === 1 ? "" : "es"} registrado${m.goalEvents.length === 1 ? "" : "s"}` : ""}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
@@ -3295,6 +3438,89 @@ function GoalEditModal({ event, players, onSave, onClose }) {
   );
 }
 
+const COMPETITION_SUGGESTIONS = ["Liga regular", "Copa", "Amistoso", "Play-off / Eliminatoria", "Torneo"];
+const PITCH_MATERIAL_SUGGESTIONS = ["Parquet", "Cemento pulido", "PVC deportivo", "Terrazo"];
+
+// Datos de cabecera del informe que no se registran durante el partido en
+// vivo (ciudad, pabellón, material de la pista, competición, hora de fin,
+// observaciones) más el rival "por si acaso" hay que corregirlo a toro
+// pasado. Se guardan en el propio partido para no volver a pedirlos si se
+// regenera el informe más adelante.
+function ReportMetaModal({ match, onGenerate, onClose, busy }) {
+  const [city, setCity] = useState(match.city || "");
+  const [venue, setVenue] = useState(match.venue || "");
+  const [pitchMaterial, setPitchMaterial] = useState(match.pitchMaterial || "");
+  const [rivalName, setRivalName] = useState(match.rivalName || "");
+  const [rivalCrest, setRivalCrest] = useState(match.rivalCrest || null);
+  const [startTime, setStartTime] = useState(match.startTime || "");
+  const [endTime, setEndTime] = useState(match.endTime || "");
+  const [competition, setCompetition] = useState(match.competition || "");
+  const [observations, setObservations] = useState(match.observations || "");
+
+  const handleCrestFile = async (file) => {
+    if (!file) return;
+    try { setRivalCrest(await fileToDataUrl(file)); } catch (e) {}
+  };
+
+  const inputStyle = { width: "100%", background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, color: T.text, padding: "8px 10px", fontSize: 13, boxSizing: "border-box" };
+  const labelStyle = { fontSize: 11, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4, display: "block" };
+  const Field = ({ label, children }) => <div style={{ marginBottom: 12 }}><label style={labelStyle}>{label}</label>{children}</div>;
+
+  return (
+    <div style={overlayStyle} onClick={busy ? undefined : onClose}>
+      <div style={{ ...modalCard, maxWidth: 480, maxHeight: "86vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()} className="fadein">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <div className="oswald" style={{ fontSize: 17, fontWeight: 600 }}>Crear informe</div>
+          {!busy && <button onClick={onClose} style={iconBtnSm}><X size={16} /></button>}
+        </div>
+        <div style={{ fontSize: 11, color: T.dim, margin: "6px 0 14px" }}>
+          Datos para la cabecera del informe — quedan guardados en este partido para la próxima vez.
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <Field label="Ciudad / lugar"><input value={city} onChange={(e) => setCity(e.target.value)} style={inputStyle} placeholder="p. ej. Noia" /></Field>
+          <Field label="Pabellón"><input value={venue} onChange={(e) => setVenue(e.target.value)} style={inputStyle} /></Field>
+        </div>
+
+        <Field label="Material de la pista">
+          <input value={pitchMaterial} onChange={(e) => setPitchMaterial(e.target.value)} style={inputStyle} list="pitch-material-suggestions" placeholder="p. ej. Parquet" />
+          <datalist id="pitch-material-suggestions">{PITCH_MATERIAL_SUGGESTIONS.map((s) => <option key={s} value={s} />)}</datalist>
+        </Field>
+
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 12 }}>
+          <CrestAvatar crest={rivalCrest} size={44} onPick={handleCrestFile} onReframe={() => {}} onRemove={() => setRivalCrest(null)} />
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>Nombre del rival</label>
+            <input value={rivalName} onChange={(e) => setRivalName(e.target.value)} style={inputStyle} />
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <Field label="Hora de inicio"><input value={startTime} onChange={(e) => setStartTime(e.target.value)} style={inputStyle} placeholder="18:30" /></Field>
+          <Field label="Hora de fin"><input value={endTime} onChange={(e) => setEndTime(e.target.value)} style={inputStyle} placeholder="19:30" /></Field>
+        </div>
+
+        <Field label="Competición / naturaleza del partido">
+          <input value={competition} onChange={(e) => setCompetition(e.target.value)} style={inputStyle} list="competition-suggestions" placeholder="p. ej. Liga regular" />
+          <datalist id="competition-suggestions">{COMPETITION_SUGGESTIONS.map((s) => <option key={s} value={s} />)}</datalist>
+        </Field>
+
+        <Field label="Observaciones">
+          <textarea value={observations} onChange={(e) => setObservations(e.target.value)} style={{ ...inputStyle, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} />
+        </Field>
+
+        <button
+          disabled={busy}
+          onClick={() => onGenerate({ city, venue, pitchMaterial, rivalName, rivalCrest, startTime, endTime, competition, observations })}
+          style={{ ...bigBtn, justifyContent: "center", width: "100%", background: busy ? T.surface3 : T.red, color: busy ? T.dim : "#0A0A0A", marginTop: 6, cursor: busy ? "default" : "pointer" }}
+        >
+          {busy ? "Generando…" : <><ClipboardList size={15} /> Generar informe</>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Cada falta (cometida o recibida) y cada tarjeta, con el minuto exacto en
 // que se marcó — orden cronológico, parte a parte.
 function DisciplineSection({ events }) {
@@ -3652,7 +3878,7 @@ function ClockDial({ seconds, progress, running, half }) {
         </div>
       </div>
       <div style={{ fontSize: 11, color: T.dim }}>
-        <div>{half}ª parte</div>
+        <div>{halfLabel(half)}</div>
         <div style={{ color: running ? T.red : T.dim }}>{running ? "● en juego" : "○ parado"}</div>
       </div>
     </div>
@@ -3863,7 +4089,7 @@ function RosterEditor({ players, onAdd, onRemove, onSave, onNewFile, onReframe }
   );
 }
 
-function HistoryView({ matches, trainings, teamName, teamCrest, rosterPlayers, subTab, onSubTabChange, onExport, onDeleteMatch }) {
+function HistoryView({ matches, trainings, teamName, teamCrest, rosterPlayers, subTab, onSubTabChange, onExport, onDeleteMatch, onCreateReport }) {
   const [open, setOpen] = useState(null);
   const total = matches.length + trainings.length;
   return (
@@ -3893,6 +4119,7 @@ function HistoryView({ matches, trainings, teamName, teamCrest, rosterPlayers, s
                 isOpen={open === m.date}
                 onToggle={() => setOpen(open === m.date ? null : m.date)}
                 onDelete={() => onDeleteMatch(m)}
+                onCreateReport={onCreateReport}
               />
             ))}
           </div>
@@ -3949,7 +4176,7 @@ function HistoryView({ matches, trainings, teamName, teamCrest, rosterPlayers, s
 
 /* Ficha de un partido ya guardado. Igual que el resumen en directo, deja ver
    cada parte por separado o el total, sin apilar tres tablas en pantalla. */
-function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, onToggle, onDelete }) {
+function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, onToggle, onDelete, onCreateReport }) {
   const halves = halvesOf(m);
   const [tab, setTab] = useState("total");
   const scoreOf = (h) => { const s = halfScore(m, h); return `${s.favor}-${s.contra}`; };
@@ -3965,7 +4192,7 @@ function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, 
           <div style={{ fontSize: 11, color: T.dim }}>{new Date(m.date).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })}</div>
           <div className="oswald" style={{ fontSize: 16, fontWeight: 600 }}>{(teamName || "").split(" ")[0]} {m.teamGoals} — {m.rivalScore} {m.rivalName}</div>
           {halves.length > 0 && (
-            <div style={{ fontSize: 10, color: T.dim, marginTop: 2 }}>1ª {scoreOf(1)} · 2ª {scoreOf(2)}</div>
+            <div style={{ fontSize: 10, color: T.dim, marginTop: 2 }}>{halves.map((h) => `${halfShortLabel(h.half)} ${scoreOf(h.half)}`).join(" · ")}</div>
           )}
         </div>
         <div style={{ fontSize: 11, color: T.dim }}>Ocasiones {m.occFor}–{m.occAgainst}</div>
@@ -3981,8 +4208,9 @@ function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, 
               <button onClick={() => exportSingleMatchToExcel(m, teamName)} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px" }}><FileSpreadsheet size={12} /> Excel</button>
               {/* El informe (fotos, cronología, tiros, parejas en pista...) se
                   genera solo al pulsar aquí — no al finalizar el partido, para
-                  no interrumpir con el diálogo de imprimir justo entonces. */}
-              <button onClick={() => printMatchReport(m, teamName, rosterPlayers, teamCrest)} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px", borderColor: T.red, color: T.red, fontWeight: 700 }}><ClipboardList size={12} /> Crear informe</button>
+                  no interrumpir justo entonces. Antes pide los datos de
+                  cabecera (ciudad, pabellón, competición...). */}
+              <button onClick={() => onCreateReport(m)} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px", borderColor: T.red, color: T.red, fontWeight: 700 }}><ClipboardList size={12} /> Crear informe</button>
               <button onClick={(e) => { e.stopPropagation(); onDelete(); }} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px", borderColor: T.negative, color: T.negative }}><Trash2 size={12} /> Borrar</button>
             </div>
           </div>
@@ -4036,7 +4264,7 @@ function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, 
                     <span style={{ fontWeight: 700, color: ev.type === "for" ? T.red : T.negative }}>
                       {ev.type === "for" ? `⚽ ${ev.authorName}` : "⚽ Rival"}
                     </span>
-                    {" · "}{ev.phase} · {ev.half}ª parte · {fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}
+                    {" · "}{ev.phase} · {halfLabel(ev.half)} · {fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}
                     <div style={{ color: T.dim, marginTop: 2 }}>En pista: {(ev.onCourt || []).map((p) => `#${p.number} ${p.name}`).join(", ")}</div>
                   </div>
                 ))}

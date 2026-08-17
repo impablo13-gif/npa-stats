@@ -154,9 +154,14 @@ total del partido se calcula sumando las partes. Eso aparece en tres sitios:
   cada parte con su marcador y sus goles.
 - **Historial**: la ficha de cada partido guardado deja cambiar entre 1ª, 2ª y
   total.
-- **Excel y PDF**: hoja/sección por parte, además del total.
+- **Excel e informe**: hoja/sección por parte, además del total.
 
-Si algún día se juega una prórroga, aparece como una parte más.
+El fútbol sala solo tiene 2 partes reglamentarias, así que el botón de
+siguiente parte se detiene ahí. Si al agotarse el tiempo de la 2ª parte no se
+pulsa *Finalizar partido*, aparece un botón para iniciar la **prórroga**
+(2 partes fijas de 3 minutos cada una, independientes de la duración
+configurada) — pensado solo para partidos de eliminatoria con empate; en
+liga, con empate, se finaliza directamente sin tocar ese botón.
 
 ### El portero
 
@@ -198,19 +203,30 @@ Se toca la zona donde ocurrió y queda registrado con jugador, zona y minuto.
 Se ve en Resumen, en el Historial y en la exportación a Excel (hoja
 «Zonas»).
 
-### Informe en PDF
+### Informe en Word (.docx)
 
-El botón **Crear informe**, en cualquier partido del Historial, genera un
-informe completo, con foto de cada jugador: minutos y rotaciones agrupados
-por posición, los goles de cada parte con el quinteto en pista, una
-cronología en línea de tiempo, faltas y tarjetas, tiros (con gráfico por
-jugador y de proporción a puerta/fuera/gol), goles según quién estaba en
-pista, quiénes coincidieron más tiempo juntos (parejas, tríos y cuartetos) y
-una ficha por jugador.
+El botón **Crear informe**, en cualquier partido del Historial, primero pide
+los datos de cabecera que no se registran durante el partido en vivo: ciudad,
+pabellón, material de la pista, escudo y nombre del rival (por si hay que
+corregirlo), hora de inicio y de fin, competición o naturaleza del partido
+(liga, copa, amistoso, eliminatoria...) y un cuadro de observaciones. Quedan
+guardados en el propio partido, así que si se vuelve a generar el informe más
+adelante ya salen rellenos.
+
+Con eso genera un **.docx** completo, con foto de cada jugador: minutos y
+rotaciones agrupados por posición, los goles de cada parte con el quinteto en
+pista, una cronología en línea de tiempo, faltas y tarjetas, tiros (con
+gráfico por jugador y de proporción a puerta/fuera/gol), goles según quién
+estaba en pista, quiénes coincidieron más tiempo juntos (parejas, tríos y
+cuartetos) y una ficha por jugador — el mismo diseño visual de siempre,
+convertido en páginas de una página de Word, listas para exportar a PDF desde
+ahí o desde cualquier impresora virtual. No queda texto seleccionable (son
+páginas rasterizadas para que las gráficas y el diseño salgan siempre
+idénticos), pero se genera entero sin conexión.
 
 No se genera solo al finalizar el partido — a propósito, para no interrumpir
-justo entonces con el diálogo de imprimir del navegador. Se genera cuando se
-pulsa el botón.
+justo entonces. Se genera cuando se pulsa el botón, y puede tardar unos
+segundos (el botón muestra «Generando…» mientras tanto).
 
 ### Detalles que conviene conocer
 
@@ -222,6 +238,5 @@ pulsa el botón.
   abrir ofrece retomarlo.
 - **Editar la convocatoria a mitad de partido** solo cambia la lista de
   convocados; no toca minutos, goles ni tarjetas.
-- **El informe** se genera con el diálogo de imprimir del navegador
-  (*Guardar como PDF*), sin necesidad de conexión — y solo al pulsar
-  *Crear informe*, nunca automáticamente.
+- **El informe** se descarga como archivo .docx, sin necesidad de conexión —
+  y solo al pulsar *Crear informe*, nunca automáticamente.

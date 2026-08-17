@@ -20,6 +20,7 @@ INICIAR-SESION-GITHUB.bat
 # fotos, historial) y no tienen por que acabar en un repositorio publico.
 npa-stats_copia_*.json
 *.xlsx
+*.docx
 
 # Archivos sueltos que a veces se guardan en esta misma carpeta sin ser parte
 # de la app (cuestionarios, planillas de entreno, capturas...) — solo en la
