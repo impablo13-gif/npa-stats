@@ -23,6 +23,7 @@ const T = {
   white: "#F7F7F5",
   negative: "#8B2635",
   amber: "#E3B23C",
+  gk: "#2C5FA8", // fondo distinto para el portero (o portero-jugador) en pista, para que se distinga a simple vista
   text: "#F5F5F5",
   dim: "#9A9A9A",
   line: "rgba(245,245,245,0.10)",
@@ -46,7 +47,7 @@ const defaultRoster = () =>
   }));
 
 const emptyStats = () => ({
-  seconds: 0, goals: 0, assists: 0, fouls: 0, yellow: 0, red: 0,
+  seconds: 0, goals: 0, assists: 0, fouls: 0, foulsReceived: 0, yellow: 0, red: 0,
   saves: 0, turnovers: 0, recoveries: 0, shotsOn: 0, shotsOff: 0,
 });
 const STAT_KEYS = Object.keys(emptyStats());
@@ -111,18 +112,23 @@ const STAT_DEFS = [
   { key: "shotsOff", label: "Tiro fuera", icon: X, color: T.dim },
   { key: "recoveries", label: "Recuperación", icon: Shield, color: T.red },
   { key: "turnovers", label: "Pérdida", icon: Footprints, color: T.dim },
-  { key: "fouls", label: "Falta", icon: AlertTriangle, color: T.negative },
+  { key: "fouls", label: "Falta cometida", icon: AlertTriangle, color: T.negative },
+  { key: "foulsReceived", label: "Falta recibida", icon: Shield, color: T.red },
   { key: "yellow", label: "Amarilla", icon: Square, color: T.amber },
   { key: "red", label: "Roja", icon: Square, color: T.negative },
 ];
 
 // The bottom quick-action bar's "Acciones" button opens a picker of these.
+// "Parada" es un caso especial: no se arma como las demás para tocar luego a
+// un jugador — se anota directa al portero que esté en pista (ver
+// armStatAction), así que no hace falta tocar nada más.
 const QUICK_STAT_ACTIONS = [
   { key: "shotsOn", label: "Tiro a puerta", icon: Target, color: T.red },
   { key: "shotsOff", label: "Tiro fuera", icon: X, color: T.dim },
   { key: "turnovers", label: "Pérdida", icon: Footprints, color: T.dim },
   { key: "recoveries", label: "Recuperación", icon: Shield, color: T.red },
-  { key: "fouls", label: "Falta", icon: AlertTriangle, color: T.negative },
+  { key: "fouls", label: "Falta cometida", icon: AlertTriangle, color: T.negative },
+  { key: "foulsReceived", label: "Falta recibida", icon: Shield, color: T.red },
   { key: "assists", label: "Asistencia", icon: ArrowLeftRight, color: T.red },
   { key: "saves", label: "Parada", icon: Hand, color: T.red },
 ];
@@ -207,7 +213,7 @@ const dateLabelOf = (iso) => new Date(iso).toLocaleDateString("es-ES").replace(/
 // Un jugador con solo una asistencia se quedaba fuera de todas las
 // exportaciones, porque las asistencias faltaban en este filtro.
 const hasActivity = (p) =>
-  p.seconds > 0 || p.goals || p.assists || p.fouls || p.yellow || p.red ||
+  p.seconds > 0 || p.goals || p.assists || p.fouls || p.foulsReceived || p.yellow || p.red ||
   p.saves || p.recoveries || p.turnovers || p.shotsOn || p.shotsOff;
 
 const playerRow = (p) => ({
@@ -215,7 +221,8 @@ const playerRow = (p) => ({
   Minutos: fmtMin(p.seconds), "Segundos jugados": p.seconds,
   Goles: p.goals || 0, Asistencias: p.assists || 0,
   "Tiros a puerta": p.shotsOn || 0, "Tiros fuera": p.shotsOff || 0,
-  Faltas: p.fouls || 0, Amarillas: p.yellow || 0, Rojas: p.red || 0, Paradas: p.saves || 0,
+  "Faltas cometidas": p.fouls || 0, "Faltas recibidas": p.foulsReceived || 0,
+  Amarillas: p.yellow || 0, Rojas: p.red || 0, Paradas: p.saves || 0,
   Recuperaciones: p.recoveries || 0, Pérdidas: p.turnovers || 0,
 });
 
@@ -388,12 +395,12 @@ function printMatchReport(match, teamName) {
   const esc = (v) => String(v === undefined || v === null ? "" : v)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-  const COLS = 14;
+  const COLS = 15;
   const tableFor = (players) => {
     const rowsHtml = players.filter(hasActivity).map((p) => `<tr>
         <td>${esc(p.number)}</td><td>${esc(p.name)}</td><td>${esc(p.position)}</td><td>${fmtMin(p.seconds)}</td>
         <td>${p.goals || 0}</td><td>${p.assists || 0}</td><td>${p.shotsOn || 0}</td><td>${p.shotsOff || 0}</td>
-        <td>${p.fouls || 0}</td><td>${p.yellow || 0}</td><td>${p.red || 0}</td><td>${p.saves || 0}</td>
+        <td>${p.fouls || 0}</td><td>${p.foulsReceived || 0}</td><td>${p.yellow || 0}</td><td>${p.red || 0}</td><td>${p.saves || 0}</td>
         <td>${p.recoveries || 0}</td><td>${p.turnovers || 0}</td>
       </tr>`).join("");
     return `<table style="width:100%; border-collapse:collapse; font-size:11px; margin-bottom:6px;">
@@ -401,7 +408,7 @@ function printMatchReport(match, teamName) {
           <tr style="text-align:left; border-bottom:2px solid #333;">
             <th style="padding:4px;">#</th><th style="padding:4px;">Jugador</th><th style="padding:4px;">Pos</th><th style="padding:4px;">Min</th>
             <th style="padding:4px;">G</th><th style="padding:4px;">A</th><th style="padding:4px;">TP</th><th style="padding:4px;">TF</th>
-            <th style="padding:4px;">F</th><th style="padding:4px;">TA</th><th style="padding:4px;">TR</th><th style="padding:4px;">Par</th>
+            <th style="padding:4px;">FC</th><th style="padding:4px;">FR</th><th style="padding:4px;">TA</th><th style="padding:4px;">TR</th><th style="padding:4px;">Par</th>
             <th style="padding:4px;">Rec</th><th style="padding:4px;">Pér</th>
           </tr>
         </thead>
@@ -748,6 +755,14 @@ export default function App() {
   const [actionsPopoverOpen, setActionsPopoverOpen] = useState(false);
   const [cardsPopoverOpen, setCardsPopoverOpen] = useState(false);
   const [subPickerFor, setSubPickerFor] = useState(null); // bench player object awaiting a substitution choice
+  const [goalkeeperSwapFor, setGoalkeeperSwapFor] = useState(null); // portero en pista esperando a quien lo releva
+  // A quién se ha elegido a propósito para el puesto de portero, con el
+  // selector dedicado — manda sobre la detección automática (que solo mira
+  // quién de plantilla es portero), porque si hay más de un portero en la
+  // plantilla la automática podría no ser la persona que se acaba de elegir.
+  // Null hasta el primer cambio de portero; se limpia solo si ese jugador
+  // deja la pista.
+  const [chosenGoalkeeperId, setChosenGoalkeeperId] = useState(null);
   const [goalWizard, setGoalWizard] = useState(null); // { type: 'for'|'against', authorId, authorName } — mid-flow goal registration
   const [convocados, setConvocados] = useState(null); // null = not set yet (show everyone); array of player ids once chosen
   const [convocatoriaMode, setConvocatoriaMode] = useState(null); // 'nuevo' | 'editar' | null
@@ -777,6 +792,22 @@ export default function App() {
   const stats = useMemo(() => sumHalves(statsByHalf, players), [statsByHalf, players]);
 
   const activeTeam = teams.find((t) => t.id === activeTeamId) || { id: null, name: "Mi equipo", subtitle: "", crest: null };
+
+  // Quién ocupa el puesto de portero en pista ahora mismo. Si ya se ha
+  // elegido a propósito con el selector dedicado, es ese — manda sobre la
+  // detección automática, para que un segundo portero de plantilla que siga
+  // en pista por lo que sea no le "robe" el puesto a quien se acaba de
+  // elegir. Solo cuando todavía no se ha tocado nada (arranque del partido)
+  // se recurre a detectar automáticamente qué portero de plantilla hay en
+  // pista. De aquí sale el "anclado" (no se puede sacar con un toque normal)
+  // y a quién se apunta la parada automáticamente.
+  const chosenKeeperOnCourt = chosenGoalkeeperId && onCourt.includes(chosenGoalkeeperId) ? chosenGoalkeeperId : null;
+  const rosterGoalkeeperOnCourtId = onCourt.find((id) => { const p = players.find((pp) => pp.id === id); return p && p.isGK; }) || null;
+  const keeperOnCourtId = chosenKeeperOnCourt || rosterGoalkeeperOnCourtId;
+  // La etiqueta "portero-jugador" solo aparece cuando quien ocupa el puesto
+  // no es portero de plantilla — da igual si llegó ahí por elección explícita
+  // o (caso raro) porque es el único portero que queda en pista.
+  const isActingKeeper = !!keeperOnCourtId && !(players.find((p) => p.id === keeperOnCourtId) || {}).isGK;
 
   const showToast = useCallback((msg) => {
     setToast(msg);
@@ -968,7 +999,7 @@ export default function App() {
           v: DRAFT_VERSION, savedAt: new Date().toISOString(),
           seconds, half, halfLength, rivalName, rivalScore, rivalCrest, venue, matchStartTime,
           occFor, occAgainst, onCourt, convocados, goalEvents, statsByHalf,
-          rotations, openStints: [...stintsRef.current.entries()],
+          rotations, openStints: [...stintsRef.current.entries()], chosenGoalkeeperId,
         }
       : null,
     training: trainingInProgress
@@ -1100,6 +1131,7 @@ export default function App() {
     stintsRef.current = new Map(startingFive.map((id) => [id, { half: 1, startRemaining: fullRemaining }]));
     rotationsRef.current = [];
     setRotations([]);
+    setChosenGoalkeeperId(null);
     setTrainingActive(list.map((p) => p.id));
     const ts = {}; list.forEach((p) => (ts[p.id] = { seconds: 0 }));
     setTrainingStats(ts);
@@ -1230,6 +1262,8 @@ export default function App() {
     stintsRef.current = restoredStints;
     rotationsRef.current = Array.isArray(d.rotations) ? d.rotations : [];
     setRotations(rotationsRef.current);
+    // Solo se conserva si ese jugador sigue de verdad en pista al retomar.
+    setChosenGoalkeeperId(d.chosenGoalkeeperId && oc.includes(d.chosenGoalkeeperId) ? d.chosenGoalkeeperId : null);
 
     setPendingDrafts((prev) => {
       const rest = prev && prev.training ? { training: prev.training } : null;
@@ -1327,9 +1361,36 @@ export default function App() {
       return;
     }
     if (pendingAction) { recordPendingAction(player.id, player.name); return; }
-    if (onCourt.includes(player.id)) { toggleCourt(player.id); return; }
+    if (onCourt.includes(player.id)) {
+      // El portero (o quien esté jugando de portero) va anclado: un toque
+      // normal no lo saca de pista como a cualquier otro — abre el selector
+      // dedicado para elegir con quién se cambia, y precisamente ese
+      // selector es el que marca al que entra como portero-jugador si hace
+      // falta. Así no se puede sacar al portero por accidente.
+      if (player.id === keeperOnCourtId) { setGoalkeeperSwapFor(player); return; }
+      toggleCourt(player.id);
+      return;
+    }
     if (onCourt.length < 5) { toggleCourt(player.id); return; }
     setSubPickerFor(player);
+  };
+
+  const doGoalkeeperSwap = (incomingId) => {
+    if (!goalkeeperSwapFor) return;
+    const outgoing = goalkeeperSwapFor;
+    const incoming = players.find((p) => p.id === incomingId);
+    if (!incoming) return;
+    commitTime();
+    closeStint(outgoing.id);
+    openStint(incoming.id, halfRef.current);
+    setOnCourt((prev) => prev.filter((id) => id !== outgoing.id).concat(incoming.id));
+    // Siempre se guarda explícitamente a quién se acaba de elegir — aunque
+    // sea portero de plantilla — para que mande sobre la detección
+    // automática si hubiera más de un portero en pista.
+    setChosenGoalkeeperId(incoming.id);
+    showToast(incoming.isGK ? `${incoming.name} entra de portero` : `${incoming.name} entra de portero-jugador`);
+    setGoalkeeperSwapFor(null);
+    saveDraftNow();
   };
 
   const doSubstitution = (outgoingId) => {
@@ -1449,7 +1510,17 @@ export default function App() {
     saveDraftNow();
   };
 
-  const armStatAction = (key, label) => { setActionsPopoverOpen(false); setPendingAction({ key, label }); };
+  const armStatAction = (key, label) => {
+    setActionsPopoverOpen(false);
+    if (key === "saves") {
+      if (!keeperOnCourtId) { showToast("No hay portero en pista"); return; }
+      const gk = players.find((p) => p.id === keeperOnCourtId);
+      bump(keeperOnCourtId, "saves", 1);
+      showToast(`Parada — ${gk ? gk.name : ""}`);
+      return;
+    }
+    setPendingAction({ key, label });
+  };
   const armCardAction = (key, label) => { setCardsPopoverOpen(false); setPendingAction({ key, label }); };
   const cancelPendingAction = () => setPendingAction(null);
   const recordPendingAction = (playerId, playerName) => {
@@ -1489,6 +1560,7 @@ export default function App() {
     setPlayers((prev) => { const next = prev.filter((p) => p.id !== id); persistRoster(next); return next; });
     setOnCourt((prev) => prev.filter((x) => x !== id));
     setTrainingActive((prev) => prev.filter((x) => x !== id));
+    setChosenGoalkeeperId((prev) => (prev === id ? null : prev));
   };
 
   const teamGoals = players.reduce((sum, p) => sum + ((stats[p.id] && stats[p.id].goals) || 0), 0);
@@ -1500,6 +1572,7 @@ export default function App() {
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setStatsByHalf({});
     rotationsRef.current = []; setRotations([]);
+    setChosenGoalkeeperId(null);
     const startingFive = players.slice(0, 5).map((p) => p.id);
     setOnCourt(startingFive); onCourtRef.current = startingFive;
     openStintsForCourt(startingFive, 1);
@@ -1521,6 +1594,7 @@ export default function App() {
       commitTime();
       const removed = onCourt.filter((id) => !selectedIds.includes(id));
       removed.forEach((id) => closeStint(id));
+      if (removed.includes(chosenGoalkeeperId)) setChosenGoalkeeperId(null);
       setConvocados(selectedIds);
       setOnCourt((prev) => {
         const kept = prev.filter((id) => selectedIds.includes(id));
@@ -1538,6 +1612,7 @@ export default function App() {
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setStatsByHalf({});
     rotationsRef.current = []; setRotations([]);
+    setChosenGoalkeeperId(null);
     setConvocados(selectedIds);
     const startingFive = selectedIds.slice(0, 5);
     setOnCourt(startingFive); onCourtRef.current = startingFive;
@@ -1609,6 +1684,7 @@ export default function App() {
     setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setOccFor(0); setOccAgainst(0);
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setLastEvent(null); setLastGoalEvent(null); setGoalEvents([]); setConvocados(null);
+    setChosenGoalkeeperId(null);
     setTrainingSeconds(0);
     setLoading(true);
     setActiveTeamId(id);
@@ -1649,6 +1725,9 @@ export default function App() {
   const sortedPlayers = [...players].sort((a, b) => {
     const aOn = onCourt.includes(a.id), bOn = onCourt.includes(b.id);
     if (aOn !== bOn) return aOn ? -1 : 1;
+    // El portero va anclado el primero entre quienes están en pista.
+    const aGK = a.id === keeperOnCourtId, bGK = b.id === keeperOnCourtId;
+    if (aGK !== bGK) return aGK ? -1 : 1;
     return a.number - b.number;
   });
 
@@ -1847,10 +1926,12 @@ export default function App() {
                 const stint = stintsRef.current.get(p.id);
                 const stintSeconds = isOn && stint && stint.half === half ? Math.max(0, stint.startRemaining - remaining) : 0;
                 const accumulatedSeconds = isOn ? Math.max(0, halfSecondsLive - stintSeconds) : halfSecondsLive;
+                const isKeeperCard = isOn && p.id === keeperOnCourtId;
                 return (
                   <PlayerCard
                     key={p.id} player={p} stats={stats[p.id] || emptyStats()} onCourt={isOn}
                     accumulatedSeconds={accumulatedSeconds} stintSeconds={stintSeconds}
+                    isKeeperCard={isKeeperCard} isActingKeeper={isKeeperCard && isActingKeeper}
                     armed={!!pendingAction || !!(goalWizard && goalWizard.type === "for" && !goalWizard.authorId)}
                     onTap={() => handlePlayerTap(p)}
                     onOpenStats={() => setStatPlayer(p.id)}
@@ -1951,10 +2032,23 @@ export default function App() {
       {subPickerFor && (
         <SubstitutionPicker
           incoming={subPickerFor}
-          onCourtPlayers={players.filter((p) => onCourt.includes(p.id))}
+          // El portero (o el jugador que esté haciendo de portero) no sale
+          // por esta vía — va anclado. Para cambiarlo se toca su propia
+          // tarjeta en pista, que abre el selector dedicado de abajo.
+          onCourtPlayers={players.filter((p) => onCourt.includes(p.id) && p.id !== keeperOnCourtId)}
           stats={stats}
           onPick={doSubstitution}
           onClose={() => setSubPickerFor(null)}
+        />
+      )}
+
+      {goalkeeperSwapFor && (
+        <GoalkeeperSwapModal
+          outgoing={goalkeeperSwapFor}
+          benchPlayers={players.filter((p) => !onCourt.includes(p.id) && (!convocados || convocados.includes(p.id)))}
+          stats={stats}
+          onPick={doGoalkeeperSwap}
+          onClose={() => setGoalkeeperSwapFor(null)}
         />
       )}
 
@@ -2427,11 +2521,72 @@ function SubstitutionPicker({ incoming, onCourtPlayers, stats, onPick, onClose }
   );
 }
 
+/* El portero va anclado: para cambiarlo se toca su propia tarjeta en pista,
+   que abre este selector — a diferencia de una sustitución normal, aquí se
+   elige a quién ENTRA de entre el banquillo (a quién saca ya se sabe: al
+   portero que se ha tocado). Si quien entra no es portero de plantilla,
+   queda marcado como portero-jugador en cuanto se confirma. */
+function GoalkeeperSwapModal({ outgoing, benchPlayers, stats, onPick, onClose }) {
+  const keepers = benchPlayers.filter((p) => p.isGK);
+  const outfield = benchPlayers.filter((p) => !p.isGK);
+  const Row = ({ p }) => (
+    <button key={p.id} onClick={() => onPick(p.id)} style={{ display: "flex", alignItems: "center", gap: 10, background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 10, padding: "8px 10px", cursor: "pointer", textAlign: "left", width: "100%" }}>
+      <Avatar player={p} size={36} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+        <div style={{ fontSize: 10, color: T.dim }}>{p.isGK ? "Portero" : POS_LABEL[p.position] || p.position}</div>
+      </div>
+      <div className="oswald" style={{ fontSize: 22, fontWeight: 700, color: T.gk, flexShrink: 0 }}>{p.number}</div>
+      <div className="oswald" style={{ fontSize: 14, fontWeight: 600, color: T.dim, flexShrink: 0 }}>{fmtMin((stats[p.id] && stats[p.id].seconds) || 0)}</div>
+    </button>
+  );
+  return (
+    <div style={overlayStyle} onClick={onClose}>
+      <div style={{ ...modalCard, maxWidth: 420 }} onClick={(e) => e.stopPropagation()} className="fadein">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Avatar player={outgoing} size={40} />
+            <div>
+              <div style={{ fontSize: 11, color: T.dim }}>Sale</div>
+              <div className="oswald" style={{ fontSize: 18, fontWeight: 600 }}>{outgoing.name}</div>
+            </div>
+            <div className="oswald" style={{ fontSize: 28, fontWeight: 700, color: T.gk }}>{outgoing.number}</div>
+          </div>
+          <button onClick={onClose} style={iconBtnSm}><X size={16} /></button>
+        </div>
+        <div style={{ fontSize: 12, color: T.dim, margin: "10px 0 12px" }}>¿Quién entra de portero? Si eliges a un jugador de campo, queda marcado como portero-jugador.</div>
+
+        {!benchPlayers.length && (
+          <div style={{ padding: "10px 4px", color: T.dim, fontSize: 12 }}>No queda nadie libre en el banquillo.</div>
+        )}
+
+        {keepers.length > 0 && (
+          <>
+            <div style={{ fontSize: 10, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5, margin: "4px 0 6px" }}>Porteros</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: outfield.length ? 14 : 0 }}>
+              {keepers.map((p) => <Row key={p.id} p={p} />)}
+            </div>
+          </>
+        )}
+
+        {outfield.length > 0 && (
+          <>
+            <div style={{ fontSize: 10, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5, margin: "4px 0 6px" }}>Jugadores de campo</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {outfield.map((p) => <Row key={p.id} p={p} />)}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* Tabla de estadísticas reutilizada por cada sección del resumen. */
 function StatsTable({ players, statsMap }) {
   const rows = players.filter((p) => {
     const s = statsMap[p.id];
-    return s && (s.seconds > 0 || s.goals || s.assists || s.shotsOn || s.shotsOff || s.turnovers || s.recoveries || s.fouls || s.yellow || s.red || s.saves);
+    return s && (s.seconds > 0 || s.goals || s.assists || s.shotsOn || s.shotsOff || s.turnovers || s.recoveries || s.fouls || s.foulsReceived || s.yellow || s.red || s.saves);
   });
   if (!rows.length) {
     return <div style={{ padding: "10px 4px", color: T.dim, fontSize: 12 }}>Sin actividad registrada en esta parte.</div>;
@@ -2447,7 +2602,7 @@ function StatsTable({ players, statsMap }) {
             <th style={th}>G</th><th style={th}>A</th>
             <th style={th}>TP</th><th style={th}>TF</th>
             <th style={th}>Pér</th><th style={th}>Rec</th>
-            <th style={th}>F</th><th style={th}>TA</th><th style={th}>TR</th><th style={th}>Par</th>
+            <th style={th}>FC</th><th style={th}>FR</th><th style={th}>TA</th><th style={th}>TR</th><th style={th}>Par</th>
           </tr>
         </thead>
         <tbody>
@@ -2461,7 +2616,7 @@ function StatsTable({ players, statsMap }) {
                 <td style={td}>{s.goals}</td><td style={td}>{s.assists}</td>
                 <td style={td}>{s.shotsOn}</td><td style={td}>{s.shotsOff}</td>
                 <td style={td}>{s.turnovers}</td><td style={td}>{s.recoveries}</td>
-                <td style={td}>{s.fouls}</td><td style={td}>{s.yellow}</td><td style={td}>{s.red}</td><td style={td}>{s.saves}</td>
+                <td style={td}>{s.fouls}</td><td style={td}>{s.foulsReceived || 0}</td><td style={td}>{s.yellow}</td><td style={td}>{s.red}</td><td style={td}>{s.saves}</td>
               </tr>
             );
           })}
@@ -2819,26 +2974,44 @@ function TabBtn({ active, onClick, icon: Icon, label }) {
   );
 }
 
-function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, armed, onTap, onOpenStats }) {
+function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, isKeeperCard, isActingKeeper, armed, onTap, onOpenStats }) {
   const hasBadges = stats.goals > 0 || stats.yellow > 0 || stats.red > 0;
-  const accumColor = onCourt ? "rgba(10,10,10,0.55)" : T.dim;
+  // El portero (o portero-jugador) en pista lleva fondo propio, distinto del
+  // rojo del resto — así se distingue a simple vista sin tener que leer nada.
+  const cardBg = !onCourt ? T.surface : isKeeperCard ? T.gk : T.red;
+  const borderTint = !onCourt ? T.line : isKeeperCard ? "#9FC3EE" : "#F2A3A8";
+  const glowColor = isKeeperCard ? "44,95,168" : "230,57,70";
+  const fgColor = !onCourt ? T.text : isKeeperCard ? T.white : T.bg;
+  const jerseyColor = !onCourt ? T.red : isKeeperCard ? T.white : T.bg;
+  const accumColor = !onCourt ? T.dim : isKeeperCard ? "rgba(247,247,245,0.65)" : "rgba(10,10,10,0.55)";
+  const chipBg = !onCourt ? T.surface2 : isKeeperCard ? "rgba(255,255,255,0.16)" : "rgba(10,10,10,0.18)";
+  const chipBorder = !onCourt ? T.line : isKeeperCard ? "rgba(255,255,255,0.35)" : "rgba(10,10,10,0.3)";
+  const chipColor = !onCourt ? T.dim : isKeeperCard ? T.white : T.bg;
   return (
     <div
       onClick={onTap}
       className={`tap-target${armed ? " armable" : ""}`}
       style={{
-        background: onCourt ? T.red : T.surface,
-        border: `3px solid ${onCourt ? "#F2A3A8" : T.line}`,
-        boxShadow: onCourt ? "0 0 0 3px rgba(230,57,70,0.35), 0 6px 18px rgba(230,57,70,0.45)" : "none",
+        background: cardBg,
+        border: `3px solid ${borderTint}`,
+        boxShadow: onCourt ? `0 0 0 3px rgba(${glowColor},0.35), 0 6px 18px rgba(${glowColor},0.45)` : "none",
         borderRadius: 14, padding: 12, cursor: "pointer",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <Avatar player={player} size={56} />
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: onCourt ? T.bg : T.text }}>{player.name}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: fgColor }}>{player.name}</div>
+          {/* El portero va anclado: no sale con un toque normal, así que esta
+              etiqueta recuerda por qué su tarjeta se ve distinta y avisa
+              cuando quien está parando no es el portero de plantilla. */}
+          {isKeeperCard && (
+            <div style={{ display: "inline-block", marginTop: 3, padding: "1px 6px", borderRadius: 999, background: "rgba(255,255,255,0.22)", fontSize: 8, fontWeight: 700, letterSpacing: 0.4, color: T.white }}>
+              {isActingKeeper ? "PORTERO·JUGADOR" : "PORTERO"}
+            </div>
+          )}
         </div>
-        <div className="oswald" style={{ fontSize: 34, fontWeight: 700, color: onCourt ? T.bg : T.red, lineHeight: 1, flexShrink: 0 }}>{player.number}</div>
+        <div className="oswald" style={{ fontSize: 34, fontWeight: 700, color: jerseyColor, lineHeight: 1, flexShrink: 0 }}>{player.number}</div>
       </div>
 
       {/* El tiempo de ESTA tanda en pista: solo existe mientras el jugador
@@ -2866,9 +3039,9 @@ function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, 
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {hasBadges && (
             <>
-              {stats.goals > 0 && <MiniBadge color={onCourt ? T.bg : T.red}>⚽ {stats.goals}</MiniBadge>}
-              {stats.yellow > 0 && <MiniBadge color={onCourt ? T.bg : T.amber}>🟨 {stats.yellow}</MiniBadge>}
-              {stats.red > 0 && <MiniBadge color={onCourt ? T.bg : T.negative}>🟥 {stats.red}</MiniBadge>}
+              {stats.goals > 0 && <MiniBadge color={fgColor}>⚽ {stats.goals}</MiniBadge>}
+              {stats.yellow > 0 && <MiniBadge color={onCourt ? fgColor : T.amber}>🟨 {stats.yellow}</MiniBadge>}
+              {stats.red > 0 && <MiniBadge color={onCourt ? fgColor : T.negative}>🟥 {stats.red}</MiniBadge>}
             </>
           )}
         </div>
@@ -2876,9 +3049,9 @@ function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, 
           onClick={(e) => { e.stopPropagation(); onOpenStats(); }}
           title={`Estadísticas de ${player.name}`}
           style={{
-            display: "flex", alignItems: "center", gap: 4, background: onCourt ? "rgba(10,10,10,0.18)" : T.surface2,
-            border: `1px solid ${onCourt ? "rgba(10,10,10,0.3)" : T.line}`, borderRadius: 8, padding: "3px 8px",
-            color: onCourt ? T.bg : T.dim, fontSize: 10, fontWeight: 600, cursor: "pointer", flexShrink: 0,
+            display: "flex", alignItems: "center", gap: 4, background: chipBg,
+            border: `1px solid ${chipBorder}`, borderRadius: 8, padding: "3px 8px",
+            color: chipColor, fontSize: 10, fontWeight: 600, cursor: "pointer", flexShrink: 0,
           }}
         >
           <BarChart3 size={12} /> Ficha
@@ -3121,7 +3294,7 @@ function SavedMatchCard({ match: m, teamName, isOpen, onToggle }) {
                   <th style={td}>#</th><th style={td}>Jugador</th><th style={td}>Min</th>
                   <th style={td}>G</th><th style={td}>A</th>
                   <th style={td}>TP</th><th style={td}>TF</th>
-                  <th style={td}>F</th>
+                  <th style={td}>FC</th><th style={td}>FR</th>
                   <th style={td}>TA</th><th style={td}>TR</th><th style={td}>Par</th>
                   <th style={td}>Rec</th><th style={td}>Pér</th>
                 </tr>
@@ -3134,7 +3307,7 @@ function SavedMatchCard({ match: m, teamName, isOpen, onToggle }) {
                     <td style={td}>{fmtMin(p.seconds)}</td>
                     <td style={td}>{p.goals}</td><td style={td}>{p.assists}</td>
                     <td style={td}>{p.shotsOn || 0}</td><td style={td}>{p.shotsOff || 0}</td>
-                    <td style={td}>{p.fouls}</td><td style={td}>{p.yellow}</td>
+                    <td style={td}>{p.fouls}</td><td style={td}>{p.foulsReceived || 0}</td><td style={td}>{p.yellow}</td>
                     <td style={td}>{p.red}</td><td style={td}>{p.saves}</td>
                     <td style={td}>{p.recoveries}</td><td style={td}>{p.turnovers}</td>
                   </tr>

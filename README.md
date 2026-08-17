@@ -158,6 +158,21 @@ total del partido se calcula sumando las partes. Eso aparece en tres sitios:
 
 Si algún día se juega una prórroga, aparece como una parte más.
 
+### El portero
+
+El portero en pista va **anclado**: su tarjeta tiene fondo azul propio y un
+toque normal no lo saca a la banda, para no sacarlo por accidente en mitad de
+una sustitución cualquiera. Para cambiarlo se toca su propia tarjeta, que abre
+un selector dedicado con el banquillo (porteros primero, luego jugadores de
+campo).
+
+Si se elige a un jugador de campo — típico en situaciones de 5x4 — queda
+marcado como **PORTERO·JUGADOR**, con la misma tarjeta azul, hasta que vuelva
+a cambiarse. Solo hay un portero en pista a la vez.
+
+**Parada**, en el panel de Acciones, se anota directa a quien esté ocupando el
+puesto de portero en ese momento — no hace falta tocar ningún jugador después.
+
 ### Detalles que conviene conocer
 
 - **El reloj no cuenta «tics»**, sino tiempo real del sistema. Los navegadores de

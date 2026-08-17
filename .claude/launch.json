@@ -12,6 +12,18 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "preview", "--", "--port", "4173"],
       "port": 4173
+    },
+    {
+      "name": "noia-planificador",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\Users\\impab\\Documents\\noia-planificador", "run", "dev", "--", "--port", "5182"],
+      "port": 5182
+    },
+    {
+      "name": "noia-campogramas",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\Users\\impab\\Documents\\noia-campogramas", "run", "dev", "--", "--port", "5183"],
+      "port": 5183
     }
   ]
 }
