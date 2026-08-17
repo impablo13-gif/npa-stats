@@ -200,13 +200,17 @@ Se ve en Resumen, en el Historial y en la exportación a Excel (hoja
 
 ### Informe en PDF
 
-El botón **PDF** (al finalizar un partido, o desde cualquier partido del
-Historial) genera un informe completo, con foto de cada jugador: minutos y
-rotaciones agrupados por posición, los goles de cada parte con el quinteto
-en pista, una cronología en línea de tiempo, faltas y tarjetas, tiros (con
-gráfico por jugador y de proporción a puerta/fuera/gol), goles según quién
-estaba en pista, quiénes coincidieron más tiempo juntos (parejas, tríos y
-cuartetos) y una ficha por jugador.
+El botón **Crear informe**, en cualquier partido del Historial, genera un
+informe completo, con foto de cada jugador: minutos y rotaciones agrupados
+por posición, los goles de cada parte con el quinteto en pista, una
+cronología en línea de tiempo, faltas y tarjetas, tiros (con gráfico por
+jugador y de proporción a puerta/fuera/gol), goles según quién estaba en
+pista, quiénes coincidieron más tiempo juntos (parejas, tríos y cuartetos) y
+una ficha por jugador.
+
+No se genera solo al finalizar el partido — a propósito, para no interrumpir
+justo entonces con el diálogo de imprimir del navegador. Se genera cuando se
+pulsa el botón.
 
 ### Detalles que conviene conocer
 
@@ -218,5 +222,6 @@ cuartetos) y una ficha por jugador.
   abrir ofrece retomarlo.
 - **Editar la convocatoria a mitad de partido** solo cambia la lista de
   convocados; no toca minutos, goles ni tarjetas.
-- **El PDF** se genera con el diálogo de imprimir del navegador
-  (*Guardar como PDF*), sin necesidad de conexión.
+- **El informe** se genera con el diálogo de imprimir del navegador
+  (*Guardar como PDF*), sin necesidad de conexión — y solo al pulsar
+  *Crear informe*, nunca automáticamente.

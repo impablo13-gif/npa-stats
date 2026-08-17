@@ -2136,13 +2136,15 @@ export default function App() {
     try {
       await storage.set(`matches:${activeTeamId}:${record.date}`, JSON.stringify(record));
       saved = true;
-      showToast("Partido guardado — exportando Excel y PDF…");
+      showToast("Partido guardado — exportando Excel…");
     } catch (e) { showToast("No se pudo guardar el partido"); }
     // El borrador solo se borra si el partido quedó guardado de verdad; si el
     // guardado falla, la copia sigue ahí para poder recuperarlo.
     if (saved) await clearMatchDraft(activeTeamId);
     try { exportSingleMatchToExcel(record, activeTeam.name); } catch (e) {}
-    try { printMatchReport(record, activeTeam.name, players, activeTeam.crest); } catch (e) {}
+    // El informe en PDF ya NO se abre solo: se genera a propósito con el
+    // botón "Crear informe" del partido, aquí en el Historial adonde se
+    // llega justo después de finalizar.
     setConfirmEnd(false);
     if (saved) resetMatch();
     loadHistoryFor(activeTeamId); setHistorySubTab("partidos"); setView("historial");
@@ -3977,7 +3979,10 @@ function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, 
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={() => exportSingleMatchToExcel(m, teamName)} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px" }}><FileSpreadsheet size={12} /> Excel</button>
-              <button onClick={() => printMatchReport(m, teamName, rosterPlayers, teamCrest)} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px" }}><Save size={12} /> PDF</button>
+              {/* El informe (fotos, cronología, tiros, parejas en pista...) se
+                  genera solo al pulsar aquí — no al finalizar el partido, para
+                  no interrumpir con el diálogo de imprimir justo entonces. */}
+              <button onClick={() => printMatchReport(m, teamName, rosterPlayers, teamCrest)} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px", borderColor: T.red, color: T.red, fontWeight: 700 }}><ClipboardList size={12} /> Crear informe</button>
               <button onClick={(e) => { e.stopPropagation(); onDelete(); }} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px", borderColor: T.negative, color: T.negative }}><Trash2 size={12} /> Borrar</button>
             </div>
           </div>
