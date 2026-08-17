@@ -217,19 +217,21 @@ corregirlo), hora de inicio y de fin, competición o naturaleza del partido
 guardados en el propio partido, así que si se vuelve a generar el informe más
 adelante ya salen rellenos.
 
-Con eso abre el informe completo en una **pestaña nueva** del navegador, con
-foto de cada jugador: minutos y rotaciones agrupados por posición, los goles
-de cada parte con el quinteto en pista, una cronología en línea de tiempo,
-faltas y tarjetas, tiros (con gráfico por jugador y de proporción a
-puerta/fuera/gol), goles según quién estaba en pista, quiénes coincidieron
-más tiempo juntos (parejas, tríos y cuartetos) y una ficha por jugador. Desde
-esa pestaña, el botón *Imprimir / Guardar como PDF* usa el diálogo de
-impresión del navegador si hace falta un PDF — pero no se abre solo, para no
-interrumpir con eso justo al pulsar *Crear informe*.
+Con eso muestra el informe completo **a pantalla completa dentro de la
+propia app**, con foto de cada jugador: minutos y rotaciones agrupados por
+posición, los goles de cada parte con el quinteto en pista, una cronología
+en línea de tiempo, faltas y tarjetas, tiros (con gráfico por jugador y de
+proporción a puerta/fuera/gol), goles según quién estaba en pista, quiénes
+coincidieron más tiempo juntos (parejas, tríos y cuartetos) y una ficha por
+jugador. Arriba, el botón *Imprimir / Guardar como PDF* usa el diálogo de
+impresión del navegador si hace falta un PDF, y *Cerrar* vuelve al
+Historial — pero no se abre solo, para no interrumpir con eso justo al
+pulsar *Crear informe*.
 
-Se genera entero sin conexión y sin depender de ninguna librería externa: es
-el mismo HTML que ya se construye para el informe, mostrado en su propia
-pestaña en vez de sobre la propia app.
+Se muestra dentro de la propia app, no en una pestaña o ventana nueva, a
+propósito: instalada en la tablet (sin barra de pestañas del navegador),
+`window.open()` no es fiable y puede no hacer nada. Se genera entero sin
+conexión y sin depender de ninguna librería externa.
 
 ### Detalles que conviene conocer
 
@@ -241,6 +243,6 @@ pestaña en vez de sobre la propia app.
   abrir ofrece retomarlo.
 - **Editar la convocatoria a mitad de partido** solo cambia la lista de
   convocados; no toca minutos, goles ni tarjetas.
-- **El informe** se abre en una pestaña nueva, sin necesidad de conexión — y
-  solo al pulsar *Crear informe*, nunca automáticamente. Si el navegador la
-  bloquea como ventana emergente, hay que permitirlas para este sitio.
+- **El informe** se muestra a pantalla completa dentro de la app, sin
+  necesidad de conexión — y solo al pulsar *Crear informe*, nunca
+  automáticamente.

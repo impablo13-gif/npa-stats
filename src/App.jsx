@@ -877,33 +877,37 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const halvesScoreLine = presentHalves.map((h) => { const sc = halfScore(match, h); return `${esc(halfLabel(h))}: ${sc.favor}-${sc.contra}`; }).join(" · ");
 
   // Datos de cabecera que se piden al pulsar "Crear informe" (ciudad, hora de
-  // fin, material de la pista, competición) — opcionales, así que solo entran
-  // en la línea si de verdad se rellenaron.
+  // fin, material de la pista, competición) — se muestran como chips dentro
+  // de la propia cabecera roja, para que se noten a simple vista y no como
+  // una línea de letra pequeña debajo. Opcionales: solo aparece el chip de
+  // lo que de verdad se rellenó.
   const hours = match.startTime || match.endTime ? `${esc(match.startTime || "?")}–${esc(match.endTime || "?")}` : null;
-  const metaLine = [dateStr, hours, match.city, match.venue, match.pitchMaterial, match.competition]
-    .filter(Boolean).map(esc).join(" · ");
+  const metaChip = (icon, text) => (text ? `<span style="display:inline-flex; align-items:center; gap:5px; background:rgba(255,255,255,0.22); border:1px solid rgba(255,255,255,0.35); border-radius:20px; padding:6px 12px; font-size:13px; font-weight:700; white-space:nowrap;"><span style="font-size:14px;">${icon}</span>${esc(text)}</span>` : "");
+  const metaChipsHtml = [metaChip("📅", dateStr), metaChip("🕐", hours), metaChip("📍", match.city), metaChip("🏟", match.venue), metaChip("🥎", match.pitchMaterial), metaChip("🏆", match.competition)].filter(Boolean).join("");
 
   const headerHtml = `
-    <div style="background: linear-gradient(120deg, #7A1620, #E63946); border-radius: 12px; padding: 14px 18px; display:flex; justify-content:space-between; align-items:center; color:#fff; margin-bottom: 10px;">
-      <div style="display:flex; align-items:center; gap:10px;">
-        <div style="width:44px; height:44px; border-radius:9px; background:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0;">
-          ${teamCrest ? `<img src="${teamCrest}" style="width:100%; height:100%; object-fit:cover;" />` : `<span style="font-size:18px;">🛡</span>`}
+    <div style="background: linear-gradient(120deg, #7A1620, #E63946); border-radius: 12px; padding: 14px 18px; color:#fff; margin-bottom: 10px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:44px; height:44px; border-radius:9px; background:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0;">
+            ${teamCrest ? `<img src="${teamCrest}" style="width:100%; height:100%; object-fit:cover;" />` : `<span style="font-size:18px;">🛡</span>`}
+          </div>
+          <div>
+            <div style="font-size:16px; font-weight:800; line-height:1.2;">${esc(teamName || "Equipo")}</div>
+            <div style="font-size:9px; opacity:0.85;">Informe de partido</div>
+          </div>
         </div>
-        <div>
-          <div style="font-size:16px; font-weight:800; line-height:1.2;">${esc(teamName || "Equipo")}</div>
-          <div style="font-size:9px; opacity:0.85;">Informe de partido</div>
+        <div style="text-align:right;">
+          <div style="display:flex; align-items:center; gap:8px; justify-content:flex-end;">
+            <span style="font-size:14px; font-weight:700;">${esc(teamName || "Equipo")}</span>
+            <span style="background:#fff; color:#111; border-radius:8px; padding:3px 12px; font-size:16px; font-weight:800;">${esc(match.teamGoals)} - ${esc(match.rivalScore)}</span>
+            <span style="font-size:14px; font-weight:700;">${esc(match.rivalName || "Rival")}</span>
+            ${match.rivalCrest ? `<img src="${match.rivalCrest}" style="width:26px; height:26px; border-radius:6px; object-fit:cover; background:#fff;" />` : ""}
+          </div>
         </div>
       </div>
-      <div style="text-align:right;">
-        <div style="display:flex; align-items:center; gap:8px; justify-content:flex-end;">
-          <span style="font-size:14px; font-weight:700;">${esc(teamName || "Equipo")}</span>
-          <span style="background:#fff; color:#111; border-radius:8px; padding:3px 12px; font-size:16px; font-weight:800;">${esc(match.teamGoals)} - ${esc(match.rivalScore)}</span>
-          <span style="font-size:14px; font-weight:700;">${esc(match.rivalName || "Rival")}</span>
-          ${match.rivalCrest ? `<img src="${match.rivalCrest}" style="width:26px; height:26px; border-radius:6px; object-fit:cover; background:#fff;" />` : ""}
-        </div>
-      </div>
+      ${metaChipsHtml ? `<div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.3);">${metaChipsHtml}</div>` : ""}
     </div>
-    <div style="font-size:9px; color:#888; letter-spacing:0.3px; margin-bottom:4px;">${metaLine}</div>
     <div style="font-size:10px; color:#666; margin-bottom:6px;">
       ${halvesScoreLine} ·
       Ocasiones a favor: ${esc(match.occFor)} · Ocasiones en contra: ${esc(match.occAgainst)} · Duración parte: ${esc(match.halfLength)} min
@@ -925,56 +929,40 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
     </div>`;
 }
 
-// Abre el informe en una pestaña nueva del navegador -- el mismo diseño de
-// siempre (fotos, cronología, gráficos), como página completa en vez de
-// forzar el diálogo de imprimir sobre la propia app. Desde esa pestaña, el
-// botón "Imprimir / Guardar como PDF" usa el diálogo de impresión del
-// navegador si hace falta un PDF -- pero no se abre solo.
-//
-// `reportWindow` se recibe ya abierta (con window.open) desde el mismo
-// gesto del toque en "Generar informe": si se abriera aquí dentro, después
-// de guardar los datos del formulario, algunos navegadores (sobre todo en
-// iPad) la bloquearían como ventana emergente por no venir ya de un toque
-// directo.
-function openMatchReportTab(match, teamName, rosterPlayers, teamCrest, reportWindow) {
-  if (!reportWindow) return false;
-  const bodyHtml = buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest);
+// Título de la pestaña/vista del informe: equipo vs rival y fecha.
+function matchReportTitle(match, teamName) {
   const esc = (v) => String(v === undefined || v === null ? "" : v)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const dateLabel = new Date(match.date).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" });
-  const title = `${esc(teamName || "Equipo")} vs ${esc(match.rivalName || "Rival")} — ${esc(dateLabel)}`;
-  const doc = `<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Informe · ${title}</title>
-<style>
-  body { margin: 0; background: #f2f2f2; }
-  .report-toolbar {
-    position: sticky; top: 0; z-index: 10; background: #1a1a1a; color: #fff;
-    padding: 10px 16px; display: flex; justify-content: space-between; align-items: center;
-    gap: 12px; font-family: Arial, Helvetica, sans-serif; font-size: 13px;
-  }
-  .report-toolbar button {
-    background: #C0202E; color: #fff; border: none; border-radius: 6px;
-    padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer; flex-shrink: 0;
-  }
-  @media print { .report-toolbar { display: none; } body { background: #fff; } }
-</style>
-</head>
-<body>
-  <div class="report-toolbar">
-    <span>${title}</span>
-    <button onclick="window.print()">Imprimir / Guardar como PDF</button>
-  </div>
-  ${bodyHtml}
-</body>
-</html>`;
-  reportWindow.document.open();
-  reportWindow.document.write(doc);
-  reportWindow.document.close();
-  return true;
+  return `${esc(teamName || "Equipo")} vs ${esc(match.rivalName || "Rival")} — ${esc(dateLabel)}`;
+}
+
+// Muestra el informe a pantalla completa DENTRO de la propia app -- una PWA
+// instalada (sin barra de pestañas) no puede fiarse de window.open(): en
+// modo standalone, la mayoría de navegadores lo ignoran o lo bloquean sin
+// avisar, que es justo por lo que antes "no generaba nada" en la tablet.
+// Desde aquí, "Imprimir / Guardar como PDF" llama a window.print(), que sí
+// funciona igual dentro de una PWA instalada.
+function MatchReportView({ html, title, onClose }) {
+  return (
+    <div className="match-report-view" style={{ position: "fixed", inset: 0, zIndex: 300, background: "#f2f2f2", overflowY: "auto" }}>
+      <style>{`
+        @media print {
+          body > *:not(.match-report-view) { display: none !important; }
+          .match-report-view { position: static !important; background: #fff !important; }
+          .match-report-view .report-toolbar { display: none !important; }
+        }
+      `}</style>
+      <div className="report-toolbar" style={{ position: "sticky", top: 0, zIndex: 1, background: "#1a1a1a", color: "#fff", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontFamily: "Arial, Helvetica, sans-serif" }}>
+        <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          <button onClick={() => window.print()} style={{ background: "#C0202E", color: "#fff", border: "none", borderRadius: 6, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Imprimir / Guardar como PDF</button>
+          <button onClick={onClose} style={{ background: "transparent", color: "#fff", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 6, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Cerrar</button>
+        </div>
+      </div>
+      <div dangerouslySetInnerHTML={{ __html: html }} />
+    </div>
+  );
 }
 
 /* Avatars ------------------------------------------------------------ */
@@ -1222,6 +1210,7 @@ export default function App() {
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [confirmDeleteMatch, setConfirmDeleteMatch] = useState(null); // partido guardado a punto de borrarse
   const [reportMetaFor, setReportMetaFor] = useState(null); // partido guardado para el que se están pidiendo los datos del informe
+  const [viewingReport, setViewingReport] = useState(null); // { html, title } del informe que se está mostrando
   const [editingGoal, setEditingGoal] = useState(null); // gol del partido en curso que se está corrigiendo
   const [editingSavedGoal, setEditingSavedGoal] = useState(null); // { match, event } de un partido ya guardado, en el Historial
   const [pendingAction, setPendingAction] = useState(null); // { key, label } | null
@@ -1642,11 +1631,11 @@ export default function App() {
   // Guarda los datos de cabecera del informe (ciudad, pabellón, competición,
   // horas, observaciones, rival) en el propio partido guardado -- así, si se
   // vuelve a generar más adelante, no hay que volver a rellenarlos -- y
-  // entonces abre el informe en su propia pestaña.
-  const generateReport = (patch, reportWindow) => {
+  // entonces lo muestra a pantalla completa dentro de la propia app.
+  const generateReport = (patch) => {
     const updated = { ...reportMetaFor, ...patch };
-    const opened = openMatchReportTab(updated, activeTeam.name, players, activeTeam.crest, reportWindow);
-    if (!opened) showToast("El navegador ha bloqueado la pestaña — permite ventanas emergentes para este sitio");
+    const html = buildMatchReportHtml(updated, activeTeam.name, players, activeTeam.crest);
+    setViewingReport({ html, title: matchReportTitle(updated, activeTeam.name) });
     storage.set(`matches:${activeTeamId}:${updated.date}`, JSON.stringify(updated)).catch(() => {});
     loadHistoryFor(activeTeamId);
     setReportMetaFor(null);
@@ -2789,6 +2778,10 @@ export default function App() {
         <ReportMetaModal match={reportMetaFor} onClose={() => setReportMetaFor(null)} onGenerate={generateReport} />
       )}
 
+      {viewingReport && (
+        <MatchReportView html={viewingReport.html} title={viewingReport.title} onClose={() => setViewingReport(null)} />
+      )}
+
       {confirmEndTraining && (
         <div style={overlayStyle} onClick={() => setConfirmEndTraining(false)}>
           <div style={{ ...modalCard, maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
@@ -3452,6 +3445,16 @@ const PITCH_MATERIAL_SUGGESTIONS = ["Parquet", "Cemento pulido", "PVC deportivo"
 // observaciones) más el rival "por si acaso" hay que corregirlo a toro
 // pasado. Se guardan en el propio partido para no volver a pedirlos si se
 // regenera el informe más adelante.
+const reportFieldLabelStyle = { fontSize: 11, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4, display: "block" };
+// Definido fuera del componente a propósito: si se define dentro, React lo
+// trata como un tipo de componente nuevo en cada render (porque cambia la
+// propia referencia de la función) y desmonta y vuelve a montar cada campo
+// en cada pulsación -- eso es lo que hacía el tecleo nada fluido, con el
+// foco saltando del input a cada letra.
+function ReportField({ label, children }) {
+  return <div style={{ marginBottom: 12 }}><label style={reportFieldLabelStyle}>{label}</label>{children}</div>;
+}
+
 function ReportMetaModal({ match, onGenerate, onClose }) {
   const [city, setCity] = useState(match.city || "");
   const [venue, setVenue] = useState(match.venue || "");
@@ -3469,8 +3472,6 @@ function ReportMetaModal({ match, onGenerate, onClose }) {
   };
 
   const inputStyle = { width: "100%", background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, color: T.text, padding: "8px 10px", fontSize: 13, boxSizing: "border-box" };
-  const labelStyle = { fontSize: 11, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4, display: "block" };
-  const Field = ({ label, children }) => <div style={{ marginBottom: 12 }}><label style={labelStyle}>{label}</label>{children}</div>;
 
   return (
     <div style={overlayStyle} onClick={onClose}>
@@ -3484,45 +3485,39 @@ function ReportMetaModal({ match, onGenerate, onClose }) {
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <Field label="Ciudad / lugar"><input value={city} onChange={(e) => setCity(e.target.value)} style={inputStyle} placeholder="p. ej. Noia" /></Field>
-          <Field label="Pabellón"><input value={venue} onChange={(e) => setVenue(e.target.value)} style={inputStyle} /></Field>
+          <ReportField label="Ciudad / lugar"><input value={city} onChange={(e) => setCity(e.target.value)} style={inputStyle} placeholder="p. ej. Noia" /></ReportField>
+          <ReportField label="Pabellón"><input value={venue} onChange={(e) => setVenue(e.target.value)} style={inputStyle} /></ReportField>
         </div>
 
-        <Field label="Material de la pista">
+        <ReportField label="Material de la pista">
           <input value={pitchMaterial} onChange={(e) => setPitchMaterial(e.target.value)} style={inputStyle} list="pitch-material-suggestions" placeholder="p. ej. Parquet" />
           <datalist id="pitch-material-suggestions">{PITCH_MATERIAL_SUGGESTIONS.map((s) => <option key={s} value={s} />)}</datalist>
-        </Field>
+        </ReportField>
 
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 12 }}>
           <CrestAvatar crest={rivalCrest} size={44} onPick={handleCrestFile} onReframe={() => {}} onRemove={() => setRivalCrest(null)} />
           <div style={{ flex: 1 }}>
-            <label style={labelStyle}>Nombre del rival</label>
+            <label style={reportFieldLabelStyle}>Nombre del rival</label>
             <input value={rivalName} onChange={(e) => setRivalName(e.target.value)} style={inputStyle} />
           </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <Field label="Hora de inicio"><input value={startTime} onChange={(e) => setStartTime(e.target.value)} style={inputStyle} placeholder="18:30" /></Field>
-          <Field label="Hora de fin"><input value={endTime} onChange={(e) => setEndTime(e.target.value)} style={inputStyle} placeholder="19:30" /></Field>
+          <ReportField label="Hora de inicio"><input value={startTime} onChange={(e) => setStartTime(e.target.value)} style={inputStyle} placeholder="18:30" /></ReportField>
+          <ReportField label="Hora de fin"><input value={endTime} onChange={(e) => setEndTime(e.target.value)} style={inputStyle} placeholder="19:30" /></ReportField>
         </div>
 
-        <Field label="Competición / naturaleza del partido">
+        <ReportField label="Competición / naturaleza del partido">
           <input value={competition} onChange={(e) => setCompetition(e.target.value)} style={inputStyle} list="competition-suggestions" placeholder="p. ej. Liga regular" />
           <datalist id="competition-suggestions">{COMPETITION_SUGGESTIONS.map((s) => <option key={s} value={s} />)}</datalist>
-        </Field>
+        </ReportField>
 
-        <Field label="Observaciones">
+        <ReportField label="Observaciones">
           <textarea value={observations} onChange={(e) => setObservations(e.target.value)} style={{ ...inputStyle, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} />
-        </Field>
+        </ReportField>
 
         <button
-          onClick={() => {
-            // La pestaña se abre aquí mismo, en el mismo gesto del toque —
-            // si se abriera después de esperar a un await, algunos
-            // navegadores (sobre todo en iPad) la bloquean como emergente.
-            const reportWindow = window.open("", "_blank");
-            onGenerate({ city, venue, pitchMaterial, rivalName, rivalCrest, startTime, endTime, competition, observations }, reportWindow);
-          }}
+          onClick={() => onGenerate({ city, venue, pitchMaterial, rivalName, rivalCrest, startTime, endTime, competition, observations })}
           style={{ ...bigBtn, justifyContent: "center", width: "100%", background: T.red, color: "#0A0A0A", marginTop: 6 }}
         >
           <ClipboardList size={15} /> Generar informe
