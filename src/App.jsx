@@ -1473,6 +1473,10 @@ export default function App() {
     saveDraftNow();
   };
 
+  // La sustitución normal también deja elegir sacar al portero — no hace
+  // falta acordarse de tocar su tarjeta a propósito: si es a quien se saca,
+  // esto se convierte en un cambio de portero (con la misma marca de
+  // portero-jugador si quien entra no es portero de plantilla).
   const doSubstitution = (outgoingId) => {
     if (!subPickerFor) return;
     const incoming = subPickerFor;
@@ -1480,7 +1484,12 @@ export default function App() {
     closeStint(outgoingId);
     openStint(incoming.id, halfRef.current);
     setOnCourt((prev) => prev.filter((id) => id !== outgoingId).concat(incoming.id));
-    showToast(`${incoming.name} entra por sustitución`);
+    if (outgoingId === keeperOnCourtId) {
+      setChosenGoalkeeperId(incoming.id);
+      showToast(incoming.isGK ? `${incoming.name} entra de portero` : `${incoming.name} entra de portero-jugador`);
+    } else {
+      showToast(`${incoming.name} entra por sustitución`);
+    }
     setSubPickerFor(null);
     saveDraftNow();
   };
@@ -2191,10 +2200,12 @@ export default function App() {
       {subPickerFor && (
         <SubstitutionPicker
           incoming={subPickerFor}
-          // El portero (o el jugador que esté haciendo de portero) no sale
-          // por esta vía — va anclado. Para cambiarlo se toca su propia
-          // tarjeta en pista, que abre el selector dedicado de abajo.
-          onCourtPlayers={players.filter((p) => onCourt.includes(p.id) && p.id !== keeperOnCourtId)}
+          // El portero aparece en la lista igual que cualquier otro — se
+          // puede cambiar tocando su propia tarjeta en pista (selector
+          // dedicado) o, como aquí, eligiéndolo directamente al meter a
+          // otro jugador. Va marcado aparte para que se note qué es.
+          onCourtPlayers={players.filter((p) => onCourt.includes(p.id))}
+          keeperOnCourtId={keeperOnCourtId}
           stats={stats}
           onPick={doSubstitution}
           onClose={() => setSubPickerFor(null)}
@@ -2719,7 +2730,7 @@ function ConvocatoriaModal({ players, initialSelected, mode, onConfirm, onClose 
   );
 }
 
-function SubstitutionPicker({ incoming, onCourtPlayers, stats, onPick, onClose }) {
+function SubstitutionPicker({ incoming, onCourtPlayers, keeperOnCourtId, stats, onPick, onClose }) {
   return (
     <div style={overlayStyle} onClick={onClose}>
       <div style={{ ...modalCard, maxWidth: 420 }} onClick={(e) => e.stopPropagation()} className="fadein">
@@ -2737,17 +2748,20 @@ function SubstitutionPicker({ incoming, onCourtPlayers, stats, onPick, onClose }
         <div style={{ fontSize: 12, color: T.dim, margin: "10px 0 12px" }}>La pista está completa. Elige a quién sustituye:</div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {onCourtPlayers.map((p) => (
-            <button key={p.id} onClick={() => onPick(p.id)} style={{ display: "flex", alignItems: "center", gap: 10, background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 10, padding: "8px 10px", cursor: "pointer", textAlign: "left" }}>
-              <Avatar player={p} size={36} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
-                <div style={{ fontSize: 10, color: T.dim }}>{p.position}</div>
-              </div>
-              <div className="oswald" style={{ fontSize: 22, fontWeight: 700, color: T.red, flexShrink: 0 }}>{p.number}</div>
-              <div className="oswald" style={{ fontSize: 14, fontWeight: 600, color: T.dim, flexShrink: 0 }}>{fmtMin((stats[p.id] && stats[p.id].seconds) || 0)}</div>
-            </button>
-          ))}
+          {onCourtPlayers.map((p) => {
+            const isKeeper = p.id === keeperOnCourtId;
+            return (
+              <button key={p.id} onClick={() => onPick(p.id)} style={{ display: "flex", alignItems: "center", gap: 10, background: isKeeper ? "rgba(44,95,168,0.18)" : T.surface2, border: `1px solid ${isKeeper ? T.gk : T.line}`, borderRadius: 10, padding: "8px 10px", cursor: "pointer", textAlign: "left" }}>
+                <Avatar player={p} size={36} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                  <div style={{ fontSize: 10, color: isKeeper ? "#8FC3EE" : T.dim, fontWeight: isKeeper ? 700 : 400 }}>{isKeeper ? "PORTERO" : p.position}</div>
+                </div>
+                <div className="oswald" style={{ fontSize: 22, fontWeight: 700, color: isKeeper ? T.gk : T.red, flexShrink: 0 }}>{p.number}</div>
+                <div className="oswald" style={{ fontSize: 14, fontWeight: 600, color: T.dim, flexShrink: 0 }}>{fmtMin((stats[p.id] && stats[p.id].seconds) || 0)}</div>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
