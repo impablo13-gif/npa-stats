@@ -629,6 +629,23 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
 
   const minutesHtml = byPosition(minutesRow);
 
+  /* ---- Ranking de minutos en pista, sin porteros -- muy visual, para ver
+     de un vistazo quién cargó más partido. ---- */
+  const minutesRanking = squadRows.filter((p) => !p.isGK && (p.seconds || 0) > 0).sort((a, b) => (b.seconds || 0) - (a.seconds || 0)).slice(0, 5);
+  const maxRankSeconds = Math.max(1, ...minutesRanking.map((p) => p.seconds || 0));
+  const rankMedal = (i) => (i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}`);
+  const minutesRankingHtml = !minutesRanking.length ? "" : `${sectionTitle("🏅", "Top 5 · Minutos en pista")}
+    <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">
+      ${minutesRanking.map((p, i) => `
+        <div style="display:flex; align-items:center; gap:9px; padding:6px 0; ${i < minutesRanking.length - 1 ? "border-bottom:1px solid #f2f2f2;" : ""}">
+          <span style="width:22px; text-align:center; font-size:${i < 3 ? 15 : 11}px; font-weight:800; color:#999;">${rankMedal(i)}</span>
+          ${avatarImg(p, 28)}
+          <span style="width:100px; font-size:11px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(p.name)}</span>
+          <div style="flex:1; background:#f2f2f2; border-radius:6px; height:14px; overflow:hidden;"><div style="width:${((p.seconds || 0) / maxRankSeconds) * 100}%; height:100%; background:linear-gradient(90deg,#E63946,#7A1620);"></div></div>
+          <span style="width:48px; text-align:right; font-size:12px; font-weight:800;">${fmtMin(p.seconds)}</span>
+        </div>`).join("")}
+    </div>`;
+
   /* ---- Goles del partido, separados por parte, con quinteto en pista ---- */
   const goalCard = (ev) => {
     const phaseDef = GOAL_PHASES.find((p) => p.key === ev.phase);
@@ -707,7 +724,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
       </svg>`;
   })();
 
-  /* ---- Pérdidas, faltas y amarillas ---- */
+  /* ---- Pérdidas, faltas y tarjetas -- cada cosa en su propio dashboard ---- */
   const discByPlayer = new Map();
   (match.disciplineEvents || []).forEach((ev) => {
     const key = ev.playerId || `${ev.playerName}|${ev.playerNumber}`;
@@ -718,20 +735,40 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
     else if (ev.type === "yellow") d.yellowHalves.push(ev.half);
     else if (ev.type === "red") d.redHalves.push(ev.half);
   });
-  const discRowsHtml = [...discByPlayer.values()].map((d) => `
-      <div style="display:flex; align-items:center; gap:8px; padding:4px 0; border-bottom:1px solid #f2f2f2; font-size:10px;">
-        ${avatarImg(d, 20)}
-        <span style="flex:1; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(d.name)}</span>
-        ${d.fouls ? `<span style="color:#C0202E; font-weight:700;">↩ ${d.fouls}</span>` : ""}
-        ${d.foulsReceived ? `<span style="color:#1a8f5e; font-weight:700;">↩ ${d.foulsReceived}</span>` : ""}
-        ${d.yellowHalves.map((h) => `<span style="background:#E3B23C; color:#fff; border-radius:3px; padding:1px 5px; font-weight:700; font-size:8px;">${halfShortLabel(h)}</span>`).join("")}
-        ${d.redHalves.map((h) => `<span style="background:#8B2635; color:#fff; border-radius:3px; padding:1px 5px; font-weight:700; font-size:8px;">${halfShortLabel(h)}</span>`).join("")}
-      </div>`).join("");
 
   const totalRecoveries = squadRows.reduce((s, p) => s + (p.recoveries || 0), 0);
   const totalTurnovers = squadRows.reduce((s, p) => s + (p.turnovers || 0), 0);
 
-  const disciplineHtml = `${sectionTitle("⚠", "Pérdidas, faltas y amarillas")}
+  // Ranking con barra, foto y valor -- el mismo lenguaje visual que ya usa
+  // "Presencia en pista" y el nuevo ranking de minutos, para las faltas
+  // cometidas y las recibidas por separado.
+  const foulBarCard = (title, color, rows, valueKey) => {
+    const max = Math.max(1, ...rows.map((p) => p[valueKey] || 0));
+    const body = !rows.length ? `<div style="font-size:10px; color:#aaa;">Sin registros.</div>` : rows.map((p) => `
+        <div style="display:flex; align-items:center; gap:8px; padding:4px 0;">
+          ${avatarImg(p, 22)}
+          <span style="width:78px; font-size:10px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(p.name)}</span>
+          <div style="flex:1; background:#f2f2f2; border-radius:5px; height:10px; overflow:hidden;"><div style="width:${((p[valueKey] || 0) / max) * 100}%; height:100%; background:${color};"></div></div>
+          <span style="width:16px; text-align:right; font-size:11px; font-weight:800;">${p[valueKey] || 0}</span>
+        </div>`).join("");
+    return `<div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">
+        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; margin-bottom:8px;">${esc(title)}</div>
+        ${body}
+      </div>`;
+  };
+  const foulsCommittedRows = squadRows.filter((p) => (p.fouls || 0) > 0).sort((a, b) => (b.fouls || 0) - (a.fouls || 0));
+  const foulsReceivedRows = squadRows.filter((p) => (p.foulsReceived || 0) > 0).sort((a, b) => (b.foulsReceived || 0) - (a.foulsReceived || 0));
+
+  const cardedPlayers = [...discByPlayer.values()].filter((d) => d.yellowHalves.length || d.redHalves.length);
+  const cardsHtml = !cardedPlayers.length ? `<div style="font-size:10px; color:#aaa;">Sin tarjetas.</div>` : cardedPlayers.map((d) => `
+      <div style="display:flex; align-items:center; gap:8px; padding:4px 0;">
+        ${avatarImg(d, 22)}
+        <span style="flex:1; font-size:10px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(d.name)}</span>
+        ${d.yellowHalves.map((h) => `<span style="background:#E3B23C; color:#fff; border-radius:3px; padding:1px 5px; font-weight:700; font-size:8px;">${halfShortLabel(h)}</span>`).join("")}
+        ${d.redHalves.map((h) => `<span style="background:#8B2635; color:#fff; border-radius:3px; padding:1px 5px; font-weight:700; font-size:8px;">${halfShortLabel(h)}</span>`).join("")}
+      </div>`).join("");
+
+  const disciplineHtml = `${sectionTitle("⚠", "Pérdidas, faltas y tarjetas")}
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
       <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">
         <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; margin-bottom:10px;">Pérdidas y recuperaciones</div>
@@ -741,10 +778,13 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
         </div>
       </div>
       <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">
-        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; margin-bottom:6px;">Faltas y amarillas</div>
-        ${discRowsHtml || `<div style="font-size:10px; color:#aaa;">Sin faltas ni tarjetas registradas.</div>`}
-        <div style="font-size:8px; color:#999; margin-top:6px;">↩ rojo = cometida · ↩ verde = recibida</div>
+        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; margin-bottom:8px;">Tarjetas</div>
+        ${cardsHtml}
       </div>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px;">
+      ${foulBarCard("Faltas cometidas", "#C0202E", foulsCommittedRows, "fouls")}
+      ${foulBarCard("Faltas recibidas", "#1a8f5e", foulsReceivedRows, "foulsReceived")}
     </div>`;
 
   /* ---- Tiros: por jugador y proporción a puerta/fuera/gol ---- */
@@ -795,6 +835,50 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
       <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">${donutHtml}</div>
     </div>`;
 
+  /* ---- Campogramas: dónde pasó cada pérdida, recuperación y tiro -- un
+     punto por acción, y tocándolo se ve el minuto y la cara de quién la
+     hizo. Con <details>/<summary> nativos no hace falta JavaScript (el
+     informe no lo ejecuta), así que funciona igual sin conexión. ---- */
+  const miniPitchHtml = (events, colorFn, emptyLabel) => {
+    if (!events.length) return `<div style="font-size:10px; color:#aaa; text-align:center; padding:24px 0;">${esc(emptyLabel)}</div>`;
+    const byZone = new Map();
+    events.forEach((ev) => { if (!byZone.has(ev.zone)) byZone.set(ev.zone, []); byZone.get(ev.zone).push(ev); });
+    const cellsHtml = PITCH_ZONES.map((z) => {
+      const evs = byZone.get(z.key) || [];
+      const dotsHtml = evs.map((ev, i) => {
+        const offset = evs.length > 1 ? Math.round((i - (evs.length - 1) / 2) * 16) : 0;
+        return `<details style="position:absolute; left:calc(50% + ${offset}px); top:50%; margin:0;">
+            <summary style="list-style:none; width:13px; height:13px; margin:-7px 0 0 -7px; border-radius:50%; background:${colorFn(ev)}; border:2px solid #fff; box-shadow:0 0 0 1px rgba(0,0,0,0.25); cursor:pointer;"></summary>
+            <div style="position:absolute; z-index:5; top:13px; left:50%; transform:translateX(-50%); background:#1a1a1a; color:#fff; border-radius:8px; padding:5px 8px; display:flex; align-items:center; gap:6px; white-space:nowrap; box-shadow:0 4px 10px rgba(0,0,0,0.35);">
+              ${avatarImg({ id: ev.playerId, name: ev.playerName, number: ev.playerNumber }, 20)}
+              <div style="text-align:left;"><div style="font-size:9px; font-weight:700;">${esc(ev.playerName)}</div><div style="font-size:8px; opacity:0.8;">${esc(halfLabel(ev.half))} · ${fmtClock(ev.remaining)}</div></div>
+            </div>
+          </details>`;
+      }).join("");
+      return `<div style="position:relative; border:1px solid rgba(255,255,255,0.35);">${dotsHtml}</div>`;
+    }).join("");
+    return `<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:2px; background:#2e8f57; border-radius:8px; padding:2px; aspect-ratio:1/1.2; max-width:230px; margin:0 auto;">${cellsHtml}</div>
+      <div style="text-align:center; font-size:8px; color:#999; margin-top:5px;">Vuestra portería abajo · toca un punto para ver quién y cuándo</div>`;
+  };
+  const turnoverEvents = (match.zonedEvents || []).filter((ev) => ev.key === "turnovers");
+  const recoveryEvents = (match.zonedEvents || []).filter((ev) => ev.key === "recoveries");
+  const shotEvents = (match.zonedEvents || []).filter((ev) => ev.key === "shotsOn" || ev.key === "shotsOff");
+  const zonesPitchesHtml = (!turnoverEvents.length && !recoveryEvents.length && !shotEvents.length) ? "" : `${sectionTitle("🗺", "Campogramas")}
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
+      <div style="border:1px solid #eee; border-radius:9px; padding:10px; break-inside:avoid;">
+        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; text-align:center; margin-bottom:8px;">Pérdidas</div>
+        ${miniPitchHtml(turnoverEvents, () => "#C0202E", "Sin pérdidas registradas.")}
+      </div>
+      <div style="border:1px solid #eee; border-radius:9px; padding:10px; break-inside:avoid;">
+        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; text-align:center; margin-bottom:8px;">Recuperaciones</div>
+        ${miniPitchHtml(recoveryEvents, () => "#1a8f5e", "Sin recuperaciones registradas.")}
+      </div>
+      <div style="border:1px solid #eee; border-radius:9px; padding:10px; break-inside:avoid;">
+        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; text-align:center; margin-bottom:8px;">Tiros</div>
+        ${miniPitchHtml(shotEvents, (ev) => (ev.key === "shotsOn" ? "#2E9BD6" : "#E0A030"), "Sin tiros registrados.")}
+      </div>
+    </div>`;
+
   /* ---- Presencia en pista: goles con cada uno dentro, y con quién más minutos junto ---- */
   const onCourtGoalStats = new Map();
   goals.forEach((ev) => {
@@ -816,16 +900,23 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
         <span style="width:18px; color:#1a8f5e; font-weight:700;">${r.favor || ""}</span>
       </div>`).join("");
 
-  // El primer nombre solo no basta para distinguir (dos compañeros pueden
-  // compartir nombre de pila, y con nombres genéricos tipo "Jugador 4" el
-  // primer nombre ES SIEMPRE el mismo) — el dorsal sí es único siempre.
-  const shortNameOf = (id) => {
+  // Foto y nombre de cada combinación, con el mismo lenguaje visual que ya
+  // usa el quinteto en pista de cada gol.
+  const rowOf = (id) => {
     const g = rotGroups.find((x) => x.playerId === id);
-    return g ? `${(g.name || "").split(" ")[0]} #${g.number}` : "?";
+    return g ? { id, name: g.name, number: g.number } : { id, name: "?", number: "?" };
   };
-  const comboRow = (combo, seconds) => `<div style="display:flex; align-items:center; gap:8px; padding:4px 0; font-size:9px;">
-        <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(combo.map(shortNameOf).join(" · "))}</span>
-        <span style="font-weight:700; color:#2E9BD6; flex-shrink:0;">${fmtMin(seconds)}</span>
+  const comboRow = (combo, seconds) => `<div style="display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid #f7f7f7;">
+        <div style="display:flex; gap:4px; flex:1; flex-wrap:wrap;">
+          ${combo.map((id) => {
+            const row = rowOf(id);
+            return `<div style="text-align:center; width:34px;">
+                ${avatarImg(row, 26)}
+                <div style="font-size:7px; color:#666; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc((row.name || "").split(" ")[0])}</div>
+              </div>`;
+          }).join("")}
+        </div>
+        <span style="font-weight:700; color:#2E9BD6; flex-shrink:0; font-size:11px;">${fmtMin(seconds)}</span>
       </div>`;
   const pairs = topCombosTogether(match.rotations || [], 2, 4);
   const trios = topCombosTogether(match.rotations || [], 3, 4);
@@ -919,10 +1010,12 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
       ${headerHtml}
       ${sectionTitle("⏱", "Minutos y rotaciones")}
       ${minutesHtml}
+      ${minutesRankingHtml}
       ${goalsHtml}
       ${timelineHtml}
       ${disciplineHtml}
       ${shotsHtml}
+      ${zonesPitchesHtml}
       ${presenceSectionHtml}
       ${sectionTitle("👤", "Fichas de jugadores")}
       ${fichasHtml}
@@ -2238,6 +2331,9 @@ export default function App() {
     }));
     const record = {
       date: new Date().toISOString(), rivalName, teamGoals, rivalScore, occFor, occAgainst, halfLength, venue, startTime: matchStartTime,
+      // Igual que la hora de inicio, la de fin se anota sola al finalizar —
+      // así, al pedir los datos del informe, ya sale rellena.
+      endTime: new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }),
       players: rowsFrom(stats), // total del partido
       // Desglose por parte, en el orden en que se jugaron.
       halves: halvesPresent(statsByHalf, goalEvents).map((h) => ({ half: h, players: rowsFrom(statsByHalf[h]) })),

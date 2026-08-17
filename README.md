@@ -217,12 +217,21 @@ corregirlo), hora de inicio y de fin, competición o naturaleza del partido
 guardados en el propio partido, así que si se vuelve a generar el informe más
 adelante ya salen rellenos.
 
+La hora de inicio y la de fin del partido se anotan solas (al arrancar el
+reloj y al finalizar el partido) — el formulario ya sale con ambas rellenas,
+aunque se pueden corregir a mano si hace falta.
+
 Con eso muestra el informe completo **a pantalla completa dentro de la
 propia app**, con foto de cada jugador: minutos y rotaciones agrupados por
-posición, los goles de cada parte con el quinteto en pista, una cronología
-en línea de tiempo, faltas y tarjetas, tiros (con gráfico por jugador y de
-proporción a puerta/fuera/gol), goles según quién estaba en pista, quiénes
-coincidieron más tiempo juntos (parejas, tríos y cuartetos) y una ficha por
+posición, un **top 5 de minutos en pista** con barra y podio (sin contar
+porteros), los goles de cada parte con el quinteto en pista, una cronología
+en línea de tiempo, faltas y tarjetas — **pérdidas/recuperaciones, tarjetas,
+faltas cometidas y faltas recibidas, cada cosa en su propio dashboard**—,
+tiros (con gráfico por jugador y de proporción a puerta/fuera/gol),
+**campogramas de pérdidas, recuperaciones y tiros** (un punto por acción en
+la zona donde ocurrió — tocarlo enseña la foto del jugador y el minuto),
+goles según quién estaba en pista, quiénes coincidieron más tiempo juntos
+(parejas, tríos y cuartetos, con foto y nombre de cada uno) y una ficha por
 jugador. Arriba, el botón *Imprimir / Guardar como PDF* usa el diálogo de
 impresión del navegador si hace falta un PDF, y *Cerrar* vuelve al
 Historial — pero no se abre solo, para no interrumpir con eso justo al
