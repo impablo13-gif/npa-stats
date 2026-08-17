@@ -883,7 +883,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   // lo que de verdad se rellenó.
   const hours = match.startTime || match.endTime ? `${esc(match.startTime || "?")}–${esc(match.endTime || "?")}` : null;
   const metaChip = (icon, text) => (text ? `<span style="display:inline-flex; align-items:center; gap:5px; background:rgba(255,255,255,0.22); border:1px solid rgba(255,255,255,0.35); border-radius:20px; padding:6px 12px; font-size:13px; font-weight:700; white-space:nowrap;"><span style="font-size:14px;">${icon}</span>${esc(text)}</span>` : "");
-  const metaChipsHtml = [metaChip("📅", dateStr), metaChip("🕐", hours), metaChip("📍", match.city), metaChip("🏟", match.venue), metaChip("🥎", match.pitchMaterial), metaChip("🏆", match.competition)].filter(Boolean).join("");
+  const metaChipsHtml = [metaChip("📅", dateStr), metaChip("🕐", hours), metaChip("📍", match.city), metaChip("🏟", match.venue), metaChip("🪵", match.pitchMaterial), metaChip("🏆", match.competition)].filter(Boolean).join("");
 
   const headerHtml = `
     <div style="background: linear-gradient(120deg, #7A1620, #E63946); border-radius: 12px; padding: 14px 18px; color:#fff; margin-bottom: 10px;">
