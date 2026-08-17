@@ -198,6 +198,16 @@ Se toca la zona donde ocurrió y queda registrado con jugador, zona y minuto.
 Se ve en Resumen, en el Historial y en la exportación a Excel (hoja
 «Zonas»).
 
+### Informe en PDF
+
+El botón **PDF** (al finalizar un partido, o desde cualquier partido del
+Historial) genera un informe completo, con foto de cada jugador: minutos y
+rotaciones agrupados por posición, los goles de cada parte con el quinteto
+en pista, una cronología en línea de tiempo, faltas y tarjetas, tiros (con
+gráfico por jugador y de proporción a puerta/fuera/gol), goles según quién
+estaba en pista, quiénes coincidieron más tiempo juntos (parejas, tríos y
+cuartetos) y una ficha por jugador.
+
 ### Detalles que conviene conocer
 
 - **El reloj no cuenta «tics»**, sino tiempo real del sistema. Los navegadores de

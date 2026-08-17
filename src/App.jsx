@@ -321,6 +321,86 @@ function rotationRowsOf(match) {
   return rows;
 }
 
+/* ---------------------------------------------------------------------- */
+/* ANÁLISIS PARA EL INFORME: quiénes coincidieron más tiempo en pista       */
+/*                                                                          */
+/* Cada rotación es un intervalo en "tiempo restante" (baja segundo a       */
+/* segundo dentro de una parte, igual que el reloj grande) — se puede medir */
+/* el solape de dos intervalos así igual que con tiempo transcurrido, sin   */
+/* necesidad de conocer la duración de la parte para convertir nada.        */
+/* ---------------------------------------------------------------------- */
+
+// half -> playerId -> [{start, end}] (start >= end, en tiempo restante)
+function buildRotationIndex(rotations) {
+  const idx = new Map();
+  (rotations || []).forEach((r) => {
+    if (!idx.has(r.half)) idx.set(r.half, new Map());
+    const halfMap = idx.get(r.half);
+    if (!halfMap.has(r.playerId)) halfMap.set(r.playerId, []);
+    halfMap.get(r.playerId).push({ start: r.startRemaining, end: r.endRemaining });
+  });
+  return idx;
+}
+
+// Cuánto tiempo coincidieron EN PISTA A LA VEZ todos los jugadores de
+// `playerIds`, dentro de una parte concreta. Barrido por los puntos de corte
+// de sus propias rachas: entre dos puntos de corte consecutivos, o están
+// todos dentro de alguna racha suya, o no cuenta ese trozo.
+function comboOverlapSecondsInHalf(halfMap, playerIds) {
+  const lists = playerIds.map((id) => halfMap.get(id) || []);
+  if (lists.some((l) => l.length === 0)) return 0;
+  const cuts = new Set();
+  lists.forEach((list) => list.forEach((iv) => { cuts.add(iv.start); cuts.add(iv.end); }));
+  const sorted = [...cuts].sort((a, b) => b - a);
+  let total = 0;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const hi = sorted[i], lo = sorted[i + 1];
+    if (hi <= lo) continue;
+    const cubierto = lists.every((list) => list.some((iv) => iv.start >= hi && iv.end <= lo));
+    if (cubierto) total += hi - lo;
+  }
+  return total;
+}
+
+function comboMinutesTogether(idx, playerIds) {
+  let total = 0;
+  idx.forEach((halfMap) => { total += comboOverlapSecondsInHalf(halfMap, playerIds); });
+  return total;
+}
+
+function kCombinations(arr, k) {
+  const out = [];
+  const pick = (start, combo) => {
+    if (combo.length === k) { out.push(combo.slice()); return; }
+    for (let i = start; i < arr.length; i++) { combo.push(arr[i]); pick(i + 1, combo); combo.pop(); }
+  };
+  pick(0, []);
+  return out;
+}
+
+// Las combinaciones con más minutos juntos, de entre quienes de verdad
+// pisaron la pista (limitar a esos evita miles de combinaciones vacías).
+function topCombosTogether(rotations, size, limit) {
+  const idx = buildRotationIndex(rotations);
+  const playerIds = [...new Set((rotations || []).map((r) => r.playerId))];
+  if (playerIds.length < size) return [];
+  const results = kCombinations(playerIds, size)
+    .map((combo) => ({ combo, seconds: comboMinutesTogether(idx, combo) }))
+    .filter((r) => r.seconds > 0)
+    .sort((a, b) => b.seconds - a.seconds)
+    .slice(0, limit);
+  return results;
+}
+
+// Busca la foto de un jugador guardado en el partido cruzando con la
+// plantilla actual: por id si el partido ya lo guarda, si no por nombre y
+// dorsal (partidos guardados antes de que se empezara a guardar el id).
+function resolveRosterPlayer(row, rosterPlayers) {
+  if (!rosterPlayers || !rosterPlayers.length) return null;
+  if (row.id) { const byId = rosterPlayers.find((p) => p.id === row.id); if (byId) return byId; }
+  return rosterPlayers.find((p) => p.name === row.name && String(p.number) === String(row.number)) || null;
+}
+
 function exportClubDataToExcel(matches, trainings, teamName) {
   if (!matches.length && !trainings.length) return;
   const wb = XLSX.utils.book_new();
@@ -441,10 +521,17 @@ function exportSingleMatchToExcel(match, teamName) {
   XLSX.writeFile(wb, `${sanitizeFileName(teamName) || "equipo"}_${dateLabel}_vs_${rivalLabel}.xlsx`);
 }
 
+const POS_GROUP_COLOR = { POR: "#E0A030", CIE: "#2E9BD6", ALA: "#27AE60", PIV: "#9B59B6" };
+const POS_GROUP_ICON = { POR: "🧤", CIE: "🛡", ALA: "🪽", PIV: "🎯" };
+
 // No hay librería de PDF empaquetada, así que esto monta un informe listo para
 // imprimir y abre el diálogo del navegador — eligiendo "Guardar como PDF" ahí
 // sale el PDF. Funciona igual sin conexión, porque no descarga nada.
-function printMatchReport(match, teamName) {
+//
+// `rosterPlayers` es la plantilla ACTUAL (con fotos) — se cruza con los datos
+// guardados del partido para poder ilustrarlo, ya que las fotos no se
+// guardan dentro del propio partido. `teamCrest` es el escudo del equipo.
+function printMatchReport(match, teamName, rosterPlayers, teamCrest) {
   const dateStr = new Date(match.date).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" });
 
   // Los nombres los escribe el usuario: un "<" en el nombre de un jugador o de
@@ -452,92 +539,342 @@ function printMatchReport(match, teamName) {
   const esc = (v) => String(v === undefined || v === null ? "" : v)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-  const COLS = 15;
-  const tableFor = (players) => {
-    const rowsHtml = players.filter(hasActivity).map((p) => `<tr>
-        <td>${esc(p.number)}</td><td>${esc(p.name)}</td><td>${esc(p.position)}</td><td>${fmtMin(p.seconds)}</td>
-        <td>${p.goals || 0}</td><td>${p.assists || 0}</td><td>${p.shotsOn || 0}</td><td>${p.shotsOff || 0}</td>
-        <td>${p.fouls || 0}</td><td>${p.foulsReceived || 0}</td><td>${p.yellow || 0}</td><td>${p.red || 0}</td><td>${p.saves || 0}</td>
-        <td>${p.recoveries || 0}</td><td>${p.turnovers || 0}</td>
-      </tr>`).join("");
-    return `<table style="width:100%; border-collapse:collapse; font-size:11px; margin-bottom:6px;">
-        <thead>
-          <tr style="text-align:left; border-bottom:2px solid #333;">
-            <th style="padding:4px;">#</th><th style="padding:4px;">Jugador</th><th style="padding:4px;">Pos</th><th style="padding:4px;">Min</th>
-            <th style="padding:4px;">G</th><th style="padding:4px;">A</th><th style="padding:4px;">TP</th><th style="padding:4px;">TF</th>
-            <th style="padding:4px;">FC</th><th style="padding:4px;">FR</th><th style="padding:4px;">TA</th><th style="padding:4px;">TR</th><th style="padding:4px;">Par</th>
-            <th style="padding:4px;">Rec</th><th style="padding:4px;">Pér</th>
-          </tr>
-        </thead>
-        <tbody>${rowsHtml || `<tr><td colspan="${COLS}" style="padding:8px; color:#888;">Sin acciones registradas</td></tr>`}</tbody>
-      </table>`;
+  const avatarImg = (row, size = 32) => {
+    const rp = resolveRosterPlayer(row, rosterPlayers);
+    const photo = rp && rp.photo;
+    if (photo) return `<img src="${photo}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;border:1px solid #ddd;flex-shrink:0;" />`;
+    return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:#eee;display:flex;align-items:center;justify-content:center;font-size:${Math.round(size * 0.36)}px;font-weight:700;color:#888;border:1px solid #ddd;flex-shrink:0;">${esc(row.number)}</div>`;
   };
 
-  const sectionTitle = (text, sub) =>
-    `<h3 style="font-size:13px; margin:18px 0 6px; padding-bottom:3px; border-bottom:1px solid #bbb;">${esc(text)}${
-      sub ? ` <span style="font-weight:400; color:#666; font-size:11px;">${esc(sub)}</span>` : ""
-    }</h3>`;
+  const sectionTitle = (icon, text) => `
+    <div style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:800; color:#C0202E; text-transform:uppercase; letter-spacing:0.4px; margin:22px 0 8px; padding-bottom:6px; border-bottom:1px solid #e2e2e2;">
+      <span>${icon}</span><span>${esc(text)}</span>
+    </div>`;
 
-  const halvesHtml = halvesOf(match).map((h) => {
-    const sc = halfScore(match, h.half);
-    return sectionTitle(halfLabel(h.half), `${sc.favor}-${sc.contra}`) + tableFor(h.players);
-  }).join("");
+  // Convocados de este partido si se guardaron — si no (partidos de antes de
+  // que existiera la convocatoria), se enseña a toda la plantilla guardada.
+  const convocadoKeys = (match.convocados || []).length
+    ? new Set(match.convocados.map((c) => c.id || `${c.name}|${c.number}`))
+    : null;
+  const squadRows = convocadoKeys
+    ? match.players.filter((p) => convocadoKeys.has(p.id) || convocadoKeys.has(`${p.name}|${p.number}`))
+    : match.players;
 
-  const goals = match.goalEvents || [];
-  const goalsHtml = !goals.length ? "" : sectionTitle("Goles") +
-    `<table style="width:100%; border-collapse:collapse; font-size:11px;">
-      <thead><tr style="text-align:left; border-bottom:2px solid #333;">
-        <th style="padding:4px;">Parte</th><th style="padding:4px;">Restante</th><th style="padding:4px;">Tipo</th>
-        <th style="padding:4px;">Autor</th><th style="padding:4px;">Fase</th><th style="padding:4px;">En pista</th>
-      </tr></thead>
-      <tbody>${goals.map((ev) => `<tr>
-        <td style="padding:3px 4px;">${esc(ev.half)}ª</td>
-        <td style="padding:3px 4px;">${fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}</td>
-        <td style="padding:3px 4px;">${ev.type === "for" ? "A favor" : "En contra"}</td>
-        <td style="padding:3px 4px;">${esc(ev.authorName || "—")}</td>
-        <td style="padding:3px 4px;">${esc(ev.phase)}</td>
-        <td style="padding:3px 4px; color:#555;">${esc((ev.onCourt || []).map((p) => `#${p.number} ${p.name}`).join(", "))}</td>
-      </tr>`).join("")}</tbody>
-    </table>`;
+  const rotGroups = groupRotations(match.rotations || []);
+  const rotByKey = new Map();
+  rotGroups.forEach((g) => { rotByKey.set(g.playerId, g); rotByKey.set(`${g.name}|${g.number}`, g); });
+  const rotFor = (row) => rotByKey.get(row.id) || rotByKey.get(`${row.name}|${row.number}`) || null;
 
-  const rotGrouped = groupRotations(match.rotations || []);
-  const rotationsHtml = !rotGrouped.length ? "" : sectionTitle("Rotaciones") +
-    rotGrouped.map((g) => {
-      const halvesRotHtml = [...g.halves.entries()].sort((a, b) => a[0] - b[0]).map(([half, h]) => {
-        const linesHtml = h.list.map((r, i) => `<div style="display:flex; justify-content:space-between; font-size:10px; padding:1px 0;">
-            <span>${i + 1}ª rotación: ${fmtClock(r.startRemaining)} → ${fmtClock(r.endRemaining)}</span>
-            <span style="font-weight:600;">${fmtMin(r.durationSeconds)}</span>
-          </div>`).join("");
-        return `<div style="margin-bottom:4px;">
-            <div style="font-size:10px; color:#666; text-transform:uppercase; margin-bottom:1px;">${esc(halfLabel(Number(half)))}</div>
-            ${linesHtml}
-            <div style="font-size:10px; color:#555; margin-top:1px;">Acumulado ${esc(halfLabel(Number(half)))}: <strong>${fmtMin(h.total)}</strong></div>
-          </div>`;
-      }).join("");
-      return `<div style="margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid #ddd;">
-          <div style="font-size:12px; font-weight:700; margin-bottom:4px;">#${esc(g.number)} ${esc(g.name)} — Acumulado total: ${fmtMin(g.total)}</div>
-          ${halvesRotHtml}
+  /* ---- Minutos y rotaciones, agrupado por posición ---- */
+  const minutesRow = (row) => {
+    const g = rotFor(row);
+    const halvesHtml = [1, 2].map((half) => {
+      const h = g && g.halves.get(half);
+      if (!h) return `<div style="min-width:64px; color:#ccc; font-size:10px;">—</div>`;
+      const chips = h.list.map((r) => `<span>${fmtClock(r.startRemaining)}→${fmtClock(r.endRemaining)} <b style="color:#333;">${fmtMin(r.durationSeconds)}</b></span>`).join(" · ");
+      return `<div style="min-width:100px;">
+          <div style="display:inline-block; background:#1a1a1a; color:#fff; font-size:10px; font-weight:700; border-radius:5px; padding:2px 7px; margin-bottom:2px;">${fmtMin(h.total)}</div>
+          <div style="line-height:1.5; font-size:8px; color:#666;">${chips}</div>
         </div>`;
     }).join("");
+    return `<div style="display:flex; align-items:center; gap:10px; padding:7px 6px; border-bottom:1px solid #eee; break-inside:avoid;">
+        ${avatarImg(row, 28)}
+        <div style="min-width:96px;">
+          <div style="font-size:11px; font-weight:700;">${esc(row.name)}</div>
+          <div style="font-size:9px; color:#999;">#${esc(row.number)}</div>
+        </div>
+        <div style="display:flex; gap:14px; flex:1; flex-wrap:wrap;">${halvesHtml}</div>
+        <div style="font-size:13px; font-weight:800; min-width:46px; text-align:right;">${fmtMin(row.seconds)}</div>
+      </div>`;
+  };
+
+  const byPosition = (rowRenderer) => POSITIONS.map((pos) => {
+    const rows = squadRows.filter((p) => (p.position || "ALA") === pos);
+    if (!rows.length) return "";
+    return `<div style="margin-bottom:10px; break-inside:avoid;">
+        <div style="background:${POS_GROUP_COLOR[pos]}; color:#fff; font-size:10px; font-weight:800; letter-spacing:0.6px; text-transform:uppercase; padding:5px 10px; border-radius:6px 6px 0 0;">${POS_GROUP_ICON[pos]} ${esc(POS_LABEL[pos])}S</div>
+        <div style="border:1px solid #eee; border-top:none; border-radius:0 0 6px 6px;">${rows.map(rowRenderer).join("")}</div>
+      </div>`;
+  }).join("");
+
+  const minutesHtml = byPosition(minutesRow);
+
+  /* ---- Goles del partido, separados por parte, con quinteto en pista ---- */
+  const goalCard = (ev) => {
+    const phaseDef = GOAL_PHASES.find((p) => p.key === ev.phase);
+    const phaseColor = phaseDef ? phaseDef.color : "#888";
+    const onCourt = ev.onCourt || [];
+    return `<div style="border:1px solid ${ev.type === "for" ? "#cdeee0" : "#f6d3d6"}; background:${ev.type === "for" ? "#f4fbf8" : "#fdf3f4"}; border-radius:9px; padding:8px 10px; margin-bottom:8px; break-inside:avoid;">
+        <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
+          <span style="background:#1a1a1a; color:#fff; font-size:10px; font-weight:700; border-radius:5px; padding:2px 7px;">${fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}</span>
+          <span style="background:${phaseColor}; color:#fff; font-size:8px; font-weight:700; border-radius:5px; padding:2px 6px; text-transform:uppercase;">${esc(ev.phase)}</span>
+        </div>
+        <div style="display:flex; gap:6px; align-items:flex-start; flex-wrap:wrap;">
+          ${onCourt.map((p) => {
+            const isScorer = ev.type === "for" && (p.id === ev.authorId || p.name === ev.authorName);
+            return `<div style="text-align:center; width:40px;">
+                <div style="${isScorer ? "border:2px solid #C0202E; border-radius:50%; display:inline-block;" : ""}">${avatarImg(p, isScorer ? 26 : 30)}</div>
+                <div style="font-size:7px; color:${isScorer ? "#C0202E" : "#666"}; font-weight:${isScorer ? 700 : 400}; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc((p.name || "").split(" ")[0])}</div>
+              </div>`;
+          }).join("")}
+        </div>
+        <div style="font-size:10px; margin-top:5px; font-weight:700; color:${ev.type === "for" ? "#1a8f5e" : "#C0202E"};">
+          ⚽ ${ev.type === "for" ? esc(ev.authorName || "") : "Gol del rival"}
+        </div>
+      </div>`;
+  };
+
+  const goals = match.goalEvents || [];
+  const goalsByHalfHtml = [1, 2].filter((h) => goals.some((g) => g.half === h)).map((h) => {
+    const sc = halfScore(match, h);
+    return `<div>
+        <div style="font-size:10px; font-weight:800; color:#888; text-transform:uppercase; margin-bottom:6px;">${esc(halfLabel(h))} <span style="color:#111;">${sc.favor}-${sc.contra}</span></div>
+        ${goals.filter((g) => g.half === h).map(goalCard).join("")}
+      </div>`;
+  }).join("");
+  const goalsHtml = !goals.length ? "" : `${sectionTitle("⚽", "Goles del partido")}
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">${goalsByHalfHtml}</div>`;
+
+  /* ---- Cronología: los goles como puntos en una línea de tiempo ---- */
+  const totalMin = Math.max(1, match.halfLength * 2);
+  const timelineHtml = !goals.length ? "" : (() => {
+    const W = 720, H = 130, pad = 30;
+    const minToX = (min) => pad + (min / totalMin) * (W - pad * 2);
+    const points = goals.map((ev) => {
+      const elapsedInHalf = Math.max(0, match.halfLength * 60 - (ev.remaining !== undefined ? ev.remaining : 0));
+      const minuteAbs = (ev.half - 1) * match.halfLength + elapsedInHalf / 60;
+      return { ev, minute: Math.max(0, Math.min(totalMin, minuteAbs)) };
+    }).sort((a, b) => a.minute - b.minute);
+    const dotsHtml = points.map((pt, i) => {
+      const x = minToX(pt.minute);
+      const above = i % 2 === 0;
+      const color = pt.ev.type === "for" ? ((GOAL_PHASES.find((p) => p.key === pt.ev.phase) || {}).color || "#C0202E") : "#C0202E";
+      const labelY = above ? 20 : H - 32;
+      const timeY = above ? 32 : H - 44;
+      const lineY1 = above ? 26 : H - 26;
+      return `
+        <line x1="${x}" y1="${lineY1}" x2="${x}" y2="${H / 2}" stroke="#ddd" stroke-width="1" />
+        <circle cx="${x}" cy="${H / 2}" r="5" fill="${color}" />
+        <text x="${x}" y="${labelY}" text-anchor="middle" font-size="8" font-weight="700" fill="#222">${esc(pt.ev.type === "for" ? (pt.ev.authorName || "") : "En contra")}</text>
+        <text x="${x}" y="${timeY}" text-anchor="middle" font-size="7" fill="#888">${fmtMin(Math.round(pt.minute * 60))}</text>`;
+    }).join("");
+    return `${sectionTitle("⏱", "Cronología")}
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%; height:auto; display:block;">
+        <line x1="${pad}" y1="${H / 2}" x2="${W - pad}" y2="${H / 2}" stroke="#ccc" stroke-width="1.5" />
+        <circle cx="${minToX(match.halfLength)}" cy="${H / 2}" r="3" fill="#999" />
+        <text x="${minToX(match.halfLength)}" y="${H / 2 + 18}" text-anchor="middle" font-size="8" fill="#999">Descanso</text>
+        <text x="${pad}" y="${H - 6}" font-size="8" fill="#999">0'</text>
+        <text x="${W - pad}" y="${H - 6}" text-anchor="end" font-size="8" fill="#999">${totalMin}'</text>
+        ${dotsHtml}
+      </svg>`;
+  })();
+
+  /* ---- Pérdidas, faltas y amarillas ---- */
+  const discByPlayer = new Map();
+  (match.disciplineEvents || []).forEach((ev) => {
+    const key = ev.playerId || `${ev.playerName}|${ev.playerNumber}`;
+    if (!discByPlayer.has(key)) discByPlayer.set(key, { id: ev.playerId, name: ev.playerName, number: ev.playerNumber, fouls: 0, foulsReceived: 0, yellowHalves: [], redHalves: [] });
+    const d = discByPlayer.get(key);
+    if (ev.type === "fouls") d.fouls++;
+    else if (ev.type === "foulsReceived") d.foulsReceived++;
+    else if (ev.type === "yellow") d.yellowHalves.push(ev.half);
+    else if (ev.type === "red") d.redHalves.push(ev.half);
+  });
+  const discRowsHtml = [...discByPlayer.values()].map((d) => `
+      <div style="display:flex; align-items:center; gap:8px; padding:4px 0; border-bottom:1px solid #f2f2f2; font-size:10px;">
+        ${avatarImg(d, 20)}
+        <span style="flex:1; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(d.name)}</span>
+        ${d.fouls ? `<span style="color:#C0202E; font-weight:700;">↩ ${d.fouls}</span>` : ""}
+        ${d.foulsReceived ? `<span style="color:#1a8f5e; font-weight:700;">↩ ${d.foulsReceived}</span>` : ""}
+        ${d.yellowHalves.map((h) => `<span style="background:#E3B23C; color:#fff; border-radius:3px; padding:1px 5px; font-weight:700; font-size:8px;">${h}ª</span>`).join("")}
+        ${d.redHalves.map((h) => `<span style="background:#8B2635; color:#fff; border-radius:3px; padding:1px 5px; font-weight:700; font-size:8px;">${h}ª</span>`).join("")}
+      </div>`).join("");
+
+  const totalRecoveries = squadRows.reduce((s, p) => s + (p.recoveries || 0), 0);
+  const totalTurnovers = squadRows.reduce((s, p) => s + (p.turnovers || 0), 0);
+
+  const disciplineHtml = `${sectionTitle("⚠", "Pérdidas, faltas y amarillas")}
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+      <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">
+        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; margin-bottom:10px;">Pérdidas y recuperaciones</div>
+        <div style="display:flex; justify-content:space-around; text-align:center;">
+          <div><div style="font-size:22px; font-weight:800; color:#1a8f5e;">${totalRecoveries}</div><div style="font-size:8px; color:#999; text-transform:uppercase;">Recuperaciones</div></div>
+          <div><div style="font-size:22px; font-weight:800; color:#C0202E;">${totalTurnovers}</div><div style="font-size:8px; color:#999; text-transform:uppercase;">Pérdidas</div></div>
+        </div>
+      </div>
+      <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">
+        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; margin-bottom:6px;">Faltas y amarillas</div>
+        ${discRowsHtml || `<div style="font-size:10px; color:#aaa;">Sin faltas ni tarjetas registradas.</div>`}
+        <div style="font-size:8px; color:#999; margin-top:6px;">↩ rojo = cometida · ↩ verde = recibida</div>
+      </div>
+    </div>`;
+
+  /* ---- Tiros: por jugador y proporción a puerta/fuera/gol ---- */
+  const shooters = squadRows.filter((p) => (p.shotsOn || 0) + (p.shotsOff || 0) + (p.goals || 0) > 0)
+    .sort((a, b) => ((b.shotsOn || 0) + (b.shotsOff || 0) + (b.goals || 0)) - ((a.shotsOn || 0) + (a.shotsOff || 0) + (a.goals || 0)));
+  const maxShots = Math.max(1, ...shooters.map((p) => (p.shotsOn || 0) + (p.shotsOff || 0) + (p.goals || 0)));
+
+  const shotsByPlayerHtml = shooters.map((p) => {
+    const total = (p.shotsOn || 0) + (p.shotsOff || 0) + (p.goals || 0);
+    const dots = [];
+    for (let i = 0; i < (p.goals || 0); i++) dots.push(`<div style="width:8px;height:8px;border-radius:50%;background:#1a8f5e;"></div>`);
+    for (let i = 0; i < (p.shotsOn || 0); i++) dots.push(`<div style="width:8px;height:8px;border-radius:50%;background:#2E9BD6;"></div>`);
+    for (let i = 0; i < (p.shotsOff || 0); i++) dots.push(`<div style="width:8px;height:8px;border-radius:50%;border:1.5px solid #E0A030;"></div>`);
+    return `<div style="text-align:center; width:48px; flex-shrink:0;">
+        <div style="font-size:10px; font-weight:800; margin-bottom:3px;">${total}</div>
+        <div style="display:flex; flex-direction:column-reverse; gap:2px; align-items:center; min-height:${maxShots * 10}px;">${dots.join("")}</div>
+        <div style="margin-top:4px;">${avatarImg(p, 26)}</div>
+        <div style="font-size:7px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc((p.name || "").split(" ")[0])}</div>
+      </div>`;
+  }).join("");
+
+  const totShotsOn = squadRows.reduce((s, p) => s + (p.shotsOn || 0), 0);
+  const totShotsOff = squadRows.reduce((s, p) => s + (p.shotsOff || 0), 0);
+  const totGoals = squadRows.reduce((s, p) => s + (p.goals || 0), 0);
+  const totShots = totShotsOn + totShotsOff + totGoals;
+
+  const donutHtml = (() => {
+    if (!totShots) return `<div style="font-size:10px; color:#aaa; text-align:center;">Sin tiros registrados.</div>`;
+    const R = 42, cx = 55, cy = 55, sw = 15, circ = 2 * Math.PI * R;
+    let offset = 0;
+    const seg = (value, color) => {
+      const dash = (value / totShots) * circ;
+      const el = `<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-dasharray="${dash} ${circ - dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})" />`;
+      offset += dash;
+      return el;
+    };
+    return `<svg viewBox="0 0 110 110" style="width:120px; height:120px; display:block; margin:0 auto;">${seg(totShotsOn, "#2E9BD6")}${seg(totShotsOff, "#E0A030")}${seg(totGoals, "#1a8f5e")}</svg>
+      <div style="display:flex; flex-direction:column; gap:3px; font-size:8px; margin-top:8px;">
+        <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#2E9BD6;"></span> A puerta: ${totShotsOn}</span>
+        <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#E0A030;"></span> Fuera: ${totShotsOff}</span>
+        <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#1a8f5e;"></span> Gol: ${totGoals}</span>
+      </div>`;
+  })();
+
+  const shotsHtml = !totShots ? "" : `${sectionTitle("🎯", "Tiros")}
+    <div style="display:grid; grid-template-columns:1.6fr 1fr; gap:16px; align-items:start;">
+      <div style="border:1px solid #eee; border-radius:9px; padding:12px; display:flex; gap:10px; overflow-x:auto; break-inside:avoid;">${shotsByPlayerHtml}</div>
+      <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">${donutHtml}</div>
+    </div>`;
+
+  /* ---- Presencia en pista: goles con cada uno dentro, y con quién más minutos junto ---- */
+  const onCourtGoalStats = new Map();
+  goals.forEach((ev) => {
+    (ev.onCourt || []).forEach((p) => {
+      const key = p.id || `${p.name}|${p.number}`;
+      if (!onCourtGoalStats.has(key)) onCourtGoalStats.set(key, { ...p, favor: 0, contra: 0 });
+      const d = onCourtGoalStats.get(key);
+      if (ev.type === "for") d.favor++; else d.contra++;
+    });
+  });
+  const presenceRows = [...onCourtGoalStats.values()].sort((a, b) => (b.favor + b.contra) - (a.favor + a.contra));
+  const maxPresence = Math.max(1, ...presenceRows.map((r) => r.favor + r.contra));
+  const presenceHtml = !presenceRows.length ? `<div style="font-size:10px; color:#aaa;">Sin goles registrados.</div>` : presenceRows.map((r) => `
+      <div style="display:flex; align-items:center; gap:8px; padding:4px 0; font-size:10px;">
+        ${avatarImg(r, 20)}
+        <span style="width:64px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600;">${esc((r.name || "").split(" ")[0])}</span>
+        <span style="width:18px; text-align:right; color:#C0202E; font-weight:700;">${r.contra || ""}</span>
+        <div style="flex:1; background:#f2f2f2; border-radius:4px; height:8px; overflow:hidden;"><div style="width:${(r.favor / maxPresence) * 100}%; height:100%; background:#1a8f5e;"></div></div>
+        <span style="width:18px; color:#1a8f5e; font-weight:700;">${r.favor || ""}</span>
+      </div>`).join("");
+
+  // El primer nombre solo no basta para distinguir (dos compañeros pueden
+  // compartir nombre de pila, y con nombres genéricos tipo "Jugador 4" el
+  // primer nombre ES SIEMPRE el mismo) — el dorsal sí es único siempre.
+  const shortNameOf = (id) => {
+    const g = rotGroups.find((x) => x.playerId === id);
+    return g ? `${(g.name || "").split(" ")[0]} #${g.number}` : "?";
+  };
+  const comboRow = (combo, seconds) => `<div style="display:flex; align-items:center; gap:8px; padding:4px 0; font-size:9px;">
+        <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(combo.map(shortNameOf).join(" · "))}</span>
+        <span style="font-weight:700; color:#2E9BD6; flex-shrink:0;">${fmtMin(seconds)}</span>
+      </div>`;
+  const pairs = topCombosTogether(match.rotations || [], 2, 4);
+  const trios = topCombosTogether(match.rotations || [], 3, 4);
+  const quartets = topCombosTogether(match.rotations || [], 4, 4);
+  const pairingHtml = (!pairs.length && !trios.length && !quartets.length) ? `<div style="font-size:10px; color:#aaa;">No hay suficientes rotaciones para calcularlo.</div>` : `
+      ${pairs.length ? `<div style="font-size:9px; font-weight:700; color:#999; text-transform:uppercase; margin:6px 0 2px;">Parejas</div>${pairs.map((r) => comboRow(r.combo, r.seconds)).join("")}` : ""}
+      ${trios.length ? `<div style="font-size:9px; font-weight:700; color:#999; text-transform:uppercase; margin:6px 0 2px;">Tríos</div>${trios.map((r) => comboRow(r.combo, r.seconds)).join("")}` : ""}
+      ${quartets.length ? `<div style="font-size:9px; font-weight:700; color:#999; text-transform:uppercase; margin:6px 0 2px;">Cuartetos</div>${quartets.map((r) => comboRow(r.combo, r.seconds)).join("")}` : ""}`;
+
+  const presenceSectionHtml = (!presenceRows.length && !pairs.length && !trios.length && !quartets.length) ? "" : `${sectionTitle("👥", "Presencia en pista")}
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+      <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">
+        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; margin-bottom:8px;">Goles en pista <span style="color:#C0202E;">en contra</span> · <span style="color:#1a8f5e;">a favor</span></div>
+        ${presenceHtml}
+      </div>
+      <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">
+        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase;">Más minutos juntos</div>
+        ${pairingHtml}
+      </div>
+    </div>`;
+
+  /* ---- Fichas de jugadores, agrupado por posición ---- */
+  const statChip = (icon, val, color) => val ? `<span style="color:${color}; font-weight:700; margin-right:6px;">${icon} ${val}</span>` : "";
+  const fichaCard = (row) => {
+    const g = rotFor(row);
+    const halvesHtml = [1, 2].map((half) => {
+      const h = g && g.halves.get(half);
+      if (!h) return "";
+      const chips = h.list.map((r) => `${fmtClock(r.startRemaining)}→${fmtClock(r.endRemaining)} <b>${fmtMin(r.durationSeconds)}</b>`).join(" · ");
+      return `<div style="font-size:8px; color:#666; margin-bottom:2px;"><b style="color:#333;">${esc(halfLabel(half))}:</b> ${chips || "—"}</div>`;
+    }).join("");
+    return `<div style="border:1px solid #eee; border-radius:9px; padding:10px; display:flex; gap:10px; align-items:flex-start; break-inside:avoid;">
+        ${avatarImg(row, 38)}
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:12px; font-weight:800;">#${esc(row.number)} ${esc(row.name)}</div>
+          ${halvesHtml}
+          <div style="font-size:9px; margin-top:3px;">
+            ${statChip("⚽", row.goals, "#1a8f5e")}${statChip("🅰", row.assists, "#2E9BD6")}${statChip("🟨", row.yellow, "#E3B23C")}${statChip("🟥", row.red, "#8B2635")}${row.isGK ? statChip("🧤", row.saves, "#2E9BD6") : ""}
+          </div>
+        </div>
+        <div style="text-align:right; flex-shrink:0;">
+          <div style="font-size:14px; font-weight:800;">${fmtMin(row.seconds)}</div>
+          <div style="font-size:7px; color:#999; text-transform:uppercase;">Total</div>
+        </div>
+      </div>`;
+  };
+  const fichasHtml = byPosition(fichaCard);
 
   const sc1 = halfScore(match, 1), sc2 = halfScore(match, 2);
 
+  const headerHtml = `
+    <div style="background: linear-gradient(120deg, #7A1620, #E63946); border-radius: 12px; padding: 14px 18px; display:flex; justify-content:space-between; align-items:center; color:#fff; margin-bottom: 16px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="width:44px; height:44px; border-radius:9px; background:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0;">
+          ${teamCrest ? `<img src="${teamCrest}" style="width:100%; height:100%; object-fit:cover;" />` : `<span style="font-size:18px;">🛡</span>`}
+        </div>
+        <div>
+          <div style="font-size:16px; font-weight:800; line-height:1.2;">${esc(teamName || "Equipo")}</div>
+          <div style="font-size:9px; opacity:0.85;">Informe de partido</div>
+        </div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:8px; letter-spacing:0.8px; opacity:0.85; text-transform:uppercase;">${esc(dateStr)}${match.startTime ? " · " + esc(match.startTime) : ""}${match.venue ? " · " + esc(match.venue) : ""}</div>
+        <div style="display:flex; align-items:center; gap:8px; justify-content:flex-end; margin-top:4px;">
+          <span style="font-size:14px; font-weight:700;">${esc(teamName || "Equipo")}</span>
+          <span style="background:#fff; color:#111; border-radius:8px; padding:3px 12px; font-size:16px; font-weight:800;">${esc(match.teamGoals)} - ${esc(match.rivalScore)}</span>
+          <span style="font-size:14px; font-weight:700;">${esc(match.rivalName || "Rival")}</span>
+        </div>
+      </div>
+    </div>
+    <div style="font-size:10px; color:#666; margin-bottom:6px;">
+      1ª parte: ${sc1.favor}-${sc1.contra} · 2ª parte: ${sc2.favor}-${sc2.contra} ·
+      Ocasiones a favor: ${esc(match.occFor)} · Ocasiones en contra: ${esc(match.occAgainst)} · Duración parte: ${esc(match.halfLength)} min
+    </div>`;
+
   const html = `
-    <div style="font-family: Arial, Helvetica, sans-serif; color:#111; padding:24px;">
-      <h1 style="font-size:20px; margin:0 0 4px;">${esc(teamName || "Equipo")}</h1>
-      <div style="font-size:12px; color:#555; margin-bottom:16px;">
-        ${esc(dateStr)}${match.startTime ? " · Inicio: " + esc(match.startTime) : ""}${match.venue ? " · " + esc(match.venue) : ""}
-      </div>
-      <h2 style="font-size:16px; margin:0 0 10px;">${esc(teamName || "Equipo")} ${esc(match.teamGoals)} — ${esc(match.rivalScore)} ${esc(match.rivalName || "")}</h2>
-      <div style="font-size:12px; margin-bottom:16px; color:#333;">
-        1ª parte: ${sc1.favor}-${sc1.contra} · 2ª parte: ${sc2.favor}-${sc2.contra}<br/>
-        Ocasiones a favor: ${esc(match.occFor)} · Ocasiones en contra: ${esc(match.occAgainst)} · Duración parte: ${esc(match.halfLength)} min
-      </div>
-      ${halvesHtml}
-      ${sectionTitle("Total del partido")}
-      ${tableFor(match.players)}
+    <div style="font-family: Arial, Helvetica, sans-serif; color:#111; padding:22px; max-width:900px; margin:0 auto;">
+      ${headerHtml}
+      ${sectionTitle("⏱", "Minutos y rotaciones")}
+      ${minutesHtml}
       ${goalsHtml}
-      ${rotationsHtml}
+      ${timelineHtml}
+      ${disciplineHtml}
+      ${shotsHtml}
+      ${presenceSectionHtml}
+      ${sectionTitle("👤", "Fichas de jugadores")}
+      ${fichasHtml}
     </div>`;
 
   let container = document.getElementById("print-match-report");
@@ -1777,8 +2114,11 @@ export default function App() {
     const convocadosList = convocados
       ? players.filter((p) => convocados.includes(p.id)).map((p) => ({ id: p.id, name: p.name, number: p.number }))
       : players.map((p) => ({ id: p.id, name: p.name, number: p.number }));
+    // `id` se guarda desde ahora para poder cruzar con la plantilla actual y
+    // sacarle la foto al informe — los partidos guardados antes de esto no
+    // lo tienen, y el informe entonces cae en buscar por nombre y dorsal.
     const rowsFrom = (statsMap) => players.map((p) => ({
-      name: p.name, number: p.number, position: p.position, isGK: p.isGK,
+      id: p.id, name: p.name, number: p.number, position: p.position, isGK: p.isGK,
       ...emptyStats(), ...((statsMap || {})[p.id] || {}),
     }));
     const record = {
@@ -1802,7 +2142,7 @@ export default function App() {
     // guardado falla, la copia sigue ahí para poder recuperarlo.
     if (saved) await clearMatchDraft(activeTeamId);
     try { exportSingleMatchToExcel(record, activeTeam.name); } catch (e) {}
-    try { printMatchReport(record, activeTeam.name); } catch (e) {}
+    try { printMatchReport(record, activeTeam.name, players, activeTeam.crest); } catch (e) {}
     setConfirmEnd(false);
     if (saved) resetMatch();
     loadHistoryFor(activeTeamId); setHistorySubTab("partidos"); setView("historial");
@@ -2128,7 +2468,8 @@ export default function App() {
 
         {view === "historial" && (
           <HistoryView
-            matches={savedMatches} trainings={savedTrainings} teamName={activeTeam.name}
+            matches={savedMatches} trainings={savedTrainings} teamName={activeTeam.name} teamCrest={activeTeam.crest}
+            rosterPlayers={players}
             subTab={historySubTab} onSubTabChange={setHistorySubTab}
             onExport={() => exportClubDataToExcel(savedMatches, savedTrainings, activeTeam.name)}
             onDeleteMatch={setConfirmDeleteMatch}
@@ -3520,7 +3861,7 @@ function RosterEditor({ players, onAdd, onRemove, onSave, onNewFile, onReframe }
   );
 }
 
-function HistoryView({ matches, trainings, teamName, subTab, onSubTabChange, onExport, onDeleteMatch }) {
+function HistoryView({ matches, trainings, teamName, teamCrest, rosterPlayers, subTab, onSubTabChange, onExport, onDeleteMatch }) {
   const [open, setOpen] = useState(null);
   const total = matches.length + trainings.length;
   return (
@@ -3546,7 +3887,7 @@ function HistoryView({ matches, trainings, teamName, subTab, onSubTabChange, onE
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {matches.map((m) => (
               <SavedMatchCard
-                key={m.date} match={m} teamName={teamName}
+                key={m.date} match={m} teamName={teamName} teamCrest={teamCrest} rosterPlayers={rosterPlayers}
                 isOpen={open === m.date}
                 onToggle={() => setOpen(open === m.date ? null : m.date)}
                 onDelete={() => onDeleteMatch(m)}
@@ -3606,7 +3947,7 @@ function HistoryView({ matches, trainings, teamName, subTab, onSubTabChange, onE
 
 /* Ficha de un partido ya guardado. Igual que el resumen en directo, deja ver
    cada parte por separado o el total, sin apilar tres tablas en pantalla. */
-function SavedMatchCard({ match: m, teamName, isOpen, onToggle, onDelete }) {
+function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, onToggle, onDelete }) {
   const halves = halvesOf(m);
   const [tab, setTab] = useState("total");
   const scoreOf = (h) => { const s = halfScore(m, h); return `${s.favor}-${s.contra}`; };
@@ -3636,7 +3977,7 @@ function SavedMatchCard({ match: m, teamName, isOpen, onToggle, onDelete }) {
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={() => exportSingleMatchToExcel(m, teamName)} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px" }}><FileSpreadsheet size={12} /> Excel</button>
-              <button onClick={() => printMatchReport(m, teamName)} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px" }}><Save size={12} /> PDF</button>
+              <button onClick={() => printMatchReport(m, teamName, rosterPlayers, teamCrest)} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px" }}><Save size={12} /> PDF</button>
               <button onClick={(e) => { e.stopPropagation(); onDelete(); }} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px", borderColor: T.negative, color: T.negative }}><Trash2 size={12} /> Borrar</button>
             </div>
           </div>
