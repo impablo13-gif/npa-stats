@@ -139,6 +139,8 @@ const QUICK_STAT_ACTIONS = [
 const DISCIPLINE_KEYS = new Set(["fouls", "foulsReceived", "yellow", "red"]);
 const DISCIPLINE_LABEL = { fouls: "Falta cometida", foulsReceived: "Falta recibida", yellow: "Amarilla", red: "Roja" };
 const DISCIPLINE_COLOR = { fouls: T.negative, foulsReceived: T.red, yellow: T.amber, red: T.negative };
+const ZONED_LABEL = { turnovers: "Pérdida", recoveries: "Recuperación", shotsOn: "Tiro a puerta", shotsOff: "Tiro fuera" };
+const ZONED_COLOR = { turnovers: T.dim, recoveries: T.red, shotsOn: T.red, shotsOff: T.dim };
 
 // The bottom bar's own dedicated "Tarjeta" button opens this separate, smaller picker.
 const CARD_ACTIONS = [
@@ -159,6 +161,27 @@ const GOAL_PHASES = [
   { key: "4x3", label: "4x3", group: 5, color: "#E08A3C" },
   { key: "3x4", label: "3x4", group: 5, color: "#E08A3C" },
 ];
+
+// Pérdidas, recuperaciones y tiros llevan zona del campo — campo propio abajo
+// (fila 1, defensiva), campo rival arriba (fila 3, ataque), como se ve el
+// campo de pie en la banda. 3x3: da granularidad real sin volverse un mapa de
+// calor imposible de tocar con el dedo durante un partido.
+const PITCH_ZONES = [
+  { key: "def-izq", label: "Defensa\nizquierda", row: 0, col: 0 },
+  { key: "def-centro", label: "Defensa\ncentro", row: 0, col: 1 },
+  { key: "def-der", label: "Defensa\nderecha", row: 0, col: 2 },
+  { key: "medio-izq", label: "Medio\nizquierda", row: 1, col: 0 },
+  { key: "medio-centro", label: "Medio\ncentro", row: 1, col: 1 },
+  { key: "medio-der", label: "Medio\nderecha", row: 1, col: 2 },
+  { key: "ataque-izq", label: "Ataque\nizquierda", row: 2, col: 0 },
+  { key: "ataque-centro", label: "Ataque\ncentro", row: 2, col: 1 },
+  { key: "ataque-der", label: "Ataque\nderecha", row: 2, col: 2 },
+];
+const PITCH_ZONE_LABEL = Object.fromEntries(PITCH_ZONES.map((z) => [z.key, z.label.replace("\n", " ")]));
+
+// Estas cuatro acciones llevan quién y en qué zona del campo, con el mismo
+// asistente en tres pasos que ya usan los goles: acción → jugador → zona.
+const ZONED_KEYS = new Set(["turnovers", "recoveries", "shotsOn", "shotsOff"]);
 
 // Some browsers rotate the <img> preview to respect a photo's EXIF orientation tag but
 // ignore that same tag when the pixels are later drawn onto a <canvas> — which is exactly
@@ -242,6 +265,21 @@ const goalRowsOf = (match) => (match.goalEvents || []).map((ev) => ({
   "Jugadores en pista": (ev.onCourt || []).map((p) => `#${p.number} ${p.name}`).join(", "),
 }));
 
+const disciplineRowsOf = (match) => (match.disciplineEvents || []).map((ev) => ({
+  Parte: ev.half,
+  "Tiempo restante": fmtClock(ev.remaining),
+  Tipo: DISCIPLINE_LABEL[ev.type] || ev.type,
+  Dorsal: ev.playerNumber, Jugador: ev.playerName,
+}));
+
+const zonedRowsOf = (match) => (match.zonedEvents || []).map((ev) => ({
+  Parte: ev.half,
+  "Tiempo restante": fmtClock(ev.remaining),
+  Tipo: ZONED_LABEL[ev.key] || ev.key,
+  Dorsal: ev.playerNumber, Jugador: ev.playerName,
+  Zona: PITCH_ZONE_LABEL[ev.zone] || ev.zone,
+}));
+
 // Marcador de una parte concreta, para poder leer de un vistazo en que mitad
 // se decidio el partido.
 function halfScore(match, half) {
@@ -322,6 +360,12 @@ function exportClubDataToExcel(matches, trainings, teamName) {
       const goalRows = goalRowsOf(m);
       if (goalRows.length) addSheet(wb, goalRows, `G ${dateLabel}`, `Goles ${idx + 1}`);
 
+      const discRows = disciplineRowsOf(m);
+      if (discRows.length) addSheet(wb, discRows, `F ${dateLabel}`, `Faltas ${idx + 1}`);
+
+      const zoneRows = zonedRowsOf(m);
+      if (zoneRows.length) addSheet(wb, zoneRows, `Z ${dateLabel}`, `Zonas ${idx + 1}`);
+
       const rotRows = rotationRowsOf(m);
       if (rotRows.length) addSheet(wb, rotRows, `R ${dateLabel}`, `Rotaciones ${idx + 1}`);
     });
@@ -378,6 +422,12 @@ function exportSingleMatchToExcel(match, teamName) {
 
   const goalRows = goalRowsOf(match);
   if (goalRows.length) addSheet(wb, goalRows, "Goles");
+
+  const discRows = disciplineRowsOf(match);
+  if (discRows.length) addSheet(wb, discRows, "Faltas y tarjetas");
+
+  const zoneRows = zonedRowsOf(match);
+  if (zoneRows.length) addSheet(wb, zoneRows, "Zonas");
 
   const rotRows = rotationRowsOf(match);
   if (rotRows.length) addSheet(wb, rotRows, "Rotaciones");
@@ -781,6 +831,10 @@ export default function App() {
   // que se marcó — igual que los goles, para poder repasar después a qué
   // minuto pasó cada cosa.
   const [disciplineEvents, setDisciplineEvents] = useState([]);
+  // Asistente de tres pasos para pérdidas, recuperaciones y tiros: acción →
+  // jugador → zona del campo. { key, label, playerId, playerName } | null.
+  const [zonedActionWizard, setZonedActionWizard] = useState(null);
+  const [zonedEvents, setZonedEvents] = useState([]); // cada una con jugador, zona y minuto
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [cropTarget, setCropTarget] = useState(null); // { kind: 'player'|'teamCrest'|'rivalCrest', id, src }
@@ -1011,7 +1065,7 @@ export default function App() {
       ? {
           v: DRAFT_VERSION, savedAt: new Date().toISOString(),
           seconds, half, halfLength, rivalName, rivalScore, rivalCrest, venue, matchStartTime,
-          occFor, occAgainst, onCourt, convocados, goalEvents, disciplineEvents, statsByHalf,
+          occFor, occAgainst, onCourt, convocados, goalEvents, disciplineEvents, zonedEvents, statsByHalf,
           rotations, openStints: [...stintsRef.current.entries()], chosenGoalkeeperId,
         }
       : null,
@@ -1252,6 +1306,7 @@ export default function App() {
     setConvocados(d.convocados || null);
     setGoalEvents(d.goalEvents || []);
     setDisciplineEvents(d.disciplineEvents || []);
+    setZonedEvents(d.zonedEvents || []);
     setLastGoalEvent(null);
     setLastEvent(null);
 
@@ -1379,6 +1434,10 @@ export default function App() {
   const handlePlayerTap = (player) => {
     if (goalWizard && goalWizard.type === "for" && !goalWizard.authorId) {
       setGoalWizard({ ...goalWizard, authorId: player.id, authorName: player.name });
+      return;
+    }
+    if (zonedActionWizard && !zonedActionWizard.playerId) {
+      setZonedActionWizard({ ...zonedActionWizard, playerId: player.id, playerName: player.name });
       return;
     }
     if (pendingAction) { recordPendingAction(player.id, player.name); return; }
@@ -1575,6 +1634,10 @@ export default function App() {
       showToast(`Parada — ${gk ? gk.name : ""}`);
       return;
     }
+    // Pérdidas, recuperaciones y tiros piden también jugador y zona, con un
+    // asistente propio — el resto sigue el camino simple de siempre (tocar
+    // un jugador y listo).
+    if (ZONED_KEYS.has(key)) { setZonedActionWizard({ key, label, playerId: null, playerName: null }); return; }
     setPendingAction({ key, label });
   };
   const armCardAction = (key, label) => { setCardsPopoverOpen(false); setPendingAction({ key, label }); };
@@ -1585,6 +1648,25 @@ export default function App() {
     setLastGoalEvent(null);
     showToast(`${pendingAction.label} — ${playerName}`);
     setPendingAction(null);
+  };
+  const cancelZonedWizard = () => setZonedActionWizard(null);
+
+  const finalizeZonedAction = (zoneKey) => {
+    if (!zonedActionWizard || !zonedActionWizard.playerId) return;
+    const { key, label, playerId, playerName } = zonedActionWizard;
+    bump(playerId, key, 1);
+    const player = players.find((p) => p.id === playerId);
+    const remainingNow = Math.max(0, halfLength * 60 - seconds);
+    const ev = {
+      id: `zone-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      playerId, playerName,
+      playerNumber: player ? player.number : "?",
+      key, zone: zoneKey, half, remaining: remainingNow,
+    };
+    setZonedEvents((prev) => [...prev, ev]);
+    showToast(`${label} — ${playerName} · ${PITCH_ZONE_LABEL[zoneKey]}`);
+    setZonedActionWizard(null);
+    saveDraftNow();
   };
   const handleRivalCrestRemove = () => setRivalCrest(null);
 
@@ -1633,7 +1715,7 @@ export default function App() {
     setOnCourt(startingFive); onCourtRef.current = startingFive;
     openStintsForCourt(startingFive, 1);
     setLastEvent(null);
-    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]);
+    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null);
     setConvocados(null);
     clearMatchDraft(activeTeamId);
   };
@@ -1674,7 +1756,7 @@ export default function App() {
     setOnCourt(startingFive); onCourtRef.current = startingFive;
     openStintsForCourt(startingFive, 1);
     setLastEvent(null);
-    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]);
+    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null);
     setConvocatoriaMode(null);
     setView("partido");
   };
@@ -1697,6 +1779,7 @@ export default function App() {
       halves: halvesPresent(statsByHalf, goalEvents).map((h) => ({ half: h, players: rowsFrom(statsByHalf[h]) })),
       goalEvents, // additive: full history of who scored, from what phase, with the exact 5 on court at that moment
       disciplineEvents, // additive: cada falta y tarjeta, con el minuto exacto en que se marcó
+      zonedEvents, // additive: cada pérdida, recuperación y tiro, con jugador, zona y minuto
       convocados: convocadosList, // additive: who was called up for this match
       rotations: rotationsRef.current, // additive: cada entrada y salida de la pista de cada jugador
     };
@@ -1741,7 +1824,7 @@ export default function App() {
     setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setOccFor(0); setOccAgainst(0);
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setLastEvent(null); setLastGoalEvent(null); setGoalEvents([]); setConvocados(null);
-    setDisciplineEvents([]);
+    setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null);
     setChosenGoalkeeperId(null);
     setTrainingSeconds(0);
     setLoading(true);
@@ -1970,6 +2053,13 @@ export default function App() {
               </div>
             )}
 
+            {zonedActionWizard && !zonedActionWizard.playerId && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(230,57,70,0.18)", border: `1.5px solid ${T.red}`, borderRadius: 12, padding: "10px 14px", marginBottom: 14 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{zonedActionWizard.label} — toca un jugador</span>
+                <button onClick={cancelZonedWizard} style={iconBtnSm}><X size={14} /></button>
+              </div>
+            )}
+
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 10 }}>
               {sortedPlayers.filter((p) => !convocados || convocados.includes(p.id)).map((p) => {
                 const isOn = onCourt.includes(p.id);
@@ -1990,7 +2080,7 @@ export default function App() {
                     key={p.id} player={p} stats={stats[p.id] || emptyStats()} onCourt={isOn}
                     accumulatedSeconds={accumulatedSeconds} stintSeconds={stintSeconds}
                     isKeeperCard={isKeeperCard} isActingKeeper={isKeeperCard && isActingKeeper}
-                    armed={!!pendingAction || !!(goalWizard && goalWizard.type === "for" && !goalWizard.authorId)}
+                    armed={!!pendingAction || !!(goalWizard && goalWizard.type === "for" && !goalWizard.authorId) || !!(zonedActionWizard && !zonedActionWizard.playerId)}
                     onTap={() => handlePlayerTap(p)}
                     onOpenStats={() => setStatPlayer(p.id)}
                   />
@@ -2063,6 +2153,10 @@ export default function App() {
         />
       )}
 
+      {zonedActionWizard && zonedActionWizard.playerId && (
+        <PitchZonePicker wizard={zonedActionWizard} onPick={finalizeZonedAction} onClose={cancelZonedWizard} />
+      )}
+
       {convocatoriaMode && (
         <ConvocatoriaModal
           players={players}
@@ -2119,7 +2213,7 @@ export default function App() {
 
       {summaryOpen && (
         <SummaryModal
-          players={sortedPlayers} stats={stats} statsByHalf={statsByHalf} goalEvents={goalEvents} disciplineEvents={disciplineEvents}
+          players={sortedPlayers} stats={stats} statsByHalf={statsByHalf} goalEvents={goalEvents} disciplineEvents={disciplineEvents} zonedEvents={zonedEvents}
           rotations={rotations} openStints={[...stintsRef.current.entries()]} currentRemaining={remaining}
           onClose={() => setSummaryOpen(false)}
           onEditGoal={setEditingGoal}
@@ -2518,6 +2612,59 @@ function GoalPhasePopover({ goalWizard, onPick, onClose }) {
   );
 }
 
+/* Campo visual para marcar la zona de una pérdida, recuperación o tiro:
+   la portería propia siempre abajo, la rival arriba — como se ve el campo
+   de pie en la banda. Nueve zonas grandes, pensadas para tocar con el dedo
+   sin apuntar con precisión de milímetro en mitad de un partido. */
+function PitchZonePicker({ wizard, onPick, onClose }) {
+  const W = 300, H = 420, pad = 20;
+  const courtW = W - pad * 2, courtH = H - pad * 2;
+  const colW = courtW / 3, rowH = courtH / 3;
+  const xFor = (col) => pad + col * colW;
+  const yFor = (courtRow) => pad + courtRow * rowH;
+
+  return (
+    <div style={overlayStyle} onClick={onClose}>
+      <div style={{ ...modalCard, maxWidth: 360 }} onClick={(e) => e.stopPropagation()} className="fadein">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <div>
+            <div style={{ fontSize: 11, color: T.dim }}>{wizard.label} de {wizard.playerName}</div>
+            <div className="oswald" style={{ fontSize: 17, fontWeight: 600 }}>¿En qué zona del campo?</div>
+          </div>
+          <button onClick={onClose} style={iconBtnSm}><X size={16} /></button>
+        </div>
+        <div style={{ fontSize: 11, color: T.dim, margin: "6px 0 12px" }}>Vuestra portería abajo, la rival arriba.</div>
+
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block", touchAction: "manipulation" }}>
+          <rect x={pad} y={pad} width={courtW} height={courtH} fill="none" stroke={T.line} strokeWidth="2" rx="4" />
+          <line x1={pad} y1={H / 2} x2={W - pad} y2={H / 2} stroke={T.line} strokeWidth="2" />
+          <circle cx={W / 2} cy={H / 2} r="26" fill="none" stroke={T.line} strokeWidth="2" />
+          <path d={`M ${pad + 50} ${H - pad} A 40 40 0 0 1 ${W - pad - 50} ${H - pad}`} fill="none" stroke={T.line} strokeWidth="2" />
+          <path d={`M ${pad + 50} ${pad} A 40 40 0 0 0 ${W - pad - 50} ${pad}`} fill="none" stroke={T.line} strokeWidth="2" />
+          <rect x={W / 2 - 16} y={H - pad - 3} width="32" height="6" fill={T.dim} />
+          <rect x={W / 2 - 16} y={pad - 3} width="32" height="6" fill={T.dim} />
+
+          {PITCH_ZONES.map((z) => {
+            const courtRow = 2 - z.row; // fila 0 (defensa) se dibuja abajo, fila 2 (ataque) arriba
+            const x = xFor(z.col), y = yFor(courtRow);
+            const lines = z.label.split("\n");
+            return (
+              <g key={z.key} className="tap-target" onClick={() => onPick(z.key)} style={{ cursor: "pointer" }}>
+                <rect x={x + 3} y={y + 3} width={colW - 6} height={rowH - 6} rx="10" fill="rgba(230,57,70,0.10)" stroke={T.red} strokeWidth="1.5" strokeDasharray="4 3" />
+                <text x={x + colW / 2} y={y + rowH / 2} textAnchor="middle" dominantBaseline="middle" fill={T.text} fontSize="11" fontWeight="700" style={{ pointerEvents: "none" }}>
+                  {lines.map((line, i) => (
+                    <tspan key={i} x={x + colW / 2} dy={i === 0 ? (lines.length > 1 ? -7 : 0) : 14}>{line}</tspan>
+                  ))}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 function ConvocatoriaModal({ players, initialSelected, mode, onConfirm, onClose }) {
   const [selected, setSelected] = useState(() => new Set(initialSelected || players.map((p) => p.id)));
   const toggle = (id) => setSelected((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
@@ -2814,6 +2961,28 @@ function DisciplineSection({ events }) {
   );
 }
 
+// Cada pérdida, recuperación y tiro, con jugador, zona del campo y minuto.
+function ZonedEventsSection({ events }) {
+  if (!events || !events.length) return null;
+  const sorted = [...events].sort((a, b) => (a.half - b.half) || (b.remaining - a.remaining));
+  return (
+    <div style={{ marginTop: 22 }}>
+      <SectionHeading title="Pérdidas, recuperaciones y tiros" />
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {sorted.map((ev) => (
+          <div key={ev.id} style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, padding: "6px 10px", fontSize: 11, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <span>
+              <span style={{ fontWeight: 700, color: ZONED_COLOR[ev.key] || T.text }}>{ZONED_LABEL[ev.key] || ev.key}</span>
+              {" · "}#{ev.playerNumber} {ev.playerName} · {PITCH_ZONE_LABEL[ev.zone] || ev.zone}
+            </span>
+            <span style={{ color: T.dim, flexShrink: 0 }}>{halfLabel(ev.half)} · {fmtClock(ev.remaining)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SectionHeading({ title, right, accent }) {
   return (
     <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 6, paddingBottom: 4, borderBottom: `1px solid ${accent || T.line}` }}>
@@ -2875,7 +3044,7 @@ function RotationsSection({ rotations }) {
 /* Resumen en tres bloques: 1ª parte, 2ª parte y total del partido. Cada parte
    lleva su propio marcador y sus goles, que es como se lee un partido de
    fútbol sala: casi siempre importa en qué mitad pasó cada cosa. */
-function SummaryModal({ players, stats, statsByHalf, goalEvents, disciplineEvents, rotations, openStints, currentRemaining, onClose, onEditGoal }) {
+function SummaryModal({ players, stats, statsByHalf, goalEvents, disciplineEvents, zonedEvents, rotations, openStints, currentRemaining, onClose, onEditGoal }) {
   const halves = halvesPresent(statsByHalf, goalEvents);
   // A las rotaciones ya cerradas se le suma, como fila "en curso", la de
   // quien sigue en pista en este momento — así el resumen a mitad de partido
@@ -2928,6 +3097,7 @@ function SummaryModal({ players, stats, statsByHalf, goalEvents, disciplineEvent
         </div>
 
         <DisciplineSection events={disciplineEvents} />
+        <ZonedEventsSection events={zonedEvents} />
         <RotationsSection rotations={liveRotations} />
       </div>
     </div>
@@ -3517,6 +3687,7 @@ function SavedMatchCard({ match: m, teamName, isOpen, onToggle, onDelete }) {
           {/* Igual que las rotaciones: faltas y tarjetas se muestran siempre
               enteras, sin depender de la pestaña 1ª/2ª/Total de arriba. */}
           <DisciplineSection events={m.disciplineEvents || []} />
+          <ZonedEventsSection events={m.zonedEvents || []} />
 
           {/* Las rotaciones ya agrupan por parte, así que se muestran siempre
               enteras, sin depender de la pestaña 1ª/2ª/Total de arriba. */}

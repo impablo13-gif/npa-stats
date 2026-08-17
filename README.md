@@ -189,6 +189,15 @@ minutos y el quinteto en pista no se tocan, solo el autor y la fase.
 Un partido guardado se puede borrar desde el **Historial**, con confirmación.
 No se puede deshacer.
 
+### Pérdidas, recuperaciones y tiros por zona
+
+Al anotar una pérdida, una recuperación o un tiro (a puerta o fuera) desde
+**Acciones**, después de elegir al jugador se abre un campo de fútbol sala
+dibujado con nueve zonas — vuestra portería siempre abajo, la rival arriba.
+Se toca la zona donde ocurrió y queda registrado con jugador, zona y minuto.
+Se ve en Resumen, en el Historial y en la exportación a Excel (hoja
+«Zonas»).
+
 ### Detalles que conviene conocer
 
 - **El reloj no cuenta «tics»**, sino tiempo real del sistema. Los navegadores de
