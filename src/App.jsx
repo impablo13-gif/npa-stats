@@ -133,6 +133,13 @@ const QUICK_STAT_ACTIONS = [
   { key: "saves", label: "Parada", icon: Hand, color: T.red },
 ];
 
+// Estas cuatro llevan minuto: cada vez que se anotan (desde Acciones, la
+// tarjeta dedicada, o la ficha del jugador) queda registrado a qué marca del
+// reloj pasó, para la sección "Faltas y tarjetas" del resumen e historial.
+const DISCIPLINE_KEYS = new Set(["fouls", "foulsReceived", "yellow", "red"]);
+const DISCIPLINE_LABEL = { fouls: "Falta cometida", foulsReceived: "Falta recibida", yellow: "Amarilla", red: "Roja" };
+const DISCIPLINE_COLOR = { fouls: T.negative, foulsReceived: T.red, yellow: T.amber, red: T.negative };
+
 // The bottom bar's own dedicated "Tarjeta" button opens this separate, smaller picker.
 const CARD_ACTIONS = [
   { key: "yellow", label: "Amarilla", icon: (p) => <Square {...p} />, color: T.amber },
@@ -751,6 +758,8 @@ export default function App() {
   const [savedMatches, setSavedMatches] = useState([]);
   const [toast, setToast] = useState(null);
   const [confirmEnd, setConfirmEnd] = useState(false);
+  const [confirmDeleteMatch, setConfirmDeleteMatch] = useState(null); // partido guardado a punto de borrarse
+  const [editingGoal, setEditingGoal] = useState(null); // gol del partido en curso que se está corrigiendo
   const [pendingAction, setPendingAction] = useState(null); // { key, label } | null
   const [actionsPopoverOpen, setActionsPopoverOpen] = useState(false);
   const [cardsPopoverOpen, setCardsPopoverOpen] = useState(false);
@@ -768,6 +777,10 @@ export default function App() {
   const [convocatoriaMode, setConvocatoriaMode] = useState(null); // 'nuevo' | 'editar' | null
   const [goalEvents, setGoalEvents] = useState([]); // additive historical log: every goal with author/phase/on-court snapshot
   const [lastGoalEvent, setLastGoalEvent] = useState(null); // { id, type, authorId } of the most recent goal, for "Deshacer"
+  // Cada falta (cometida o recibida) y cada tarjeta, con el minuto exacto en
+  // que se marcó — igual que los goles, para poder repasar después a qué
+  // minuto pasó cada cosa.
+  const [disciplineEvents, setDisciplineEvents] = useState([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [cropTarget, setCropTarget] = useState(null); // { kind: 'player'|'teamCrest'|'rivalCrest', id, src }
@@ -998,7 +1011,7 @@ export default function App() {
       ? {
           v: DRAFT_VERSION, savedAt: new Date().toISOString(),
           seconds, half, halfLength, rivalName, rivalScore, rivalCrest, venue, matchStartTime,
-          occFor, occAgainst, onCourt, convocados, goalEvents, statsByHalf,
+          occFor, occAgainst, onCourt, convocados, goalEvents, disciplineEvents, statsByHalf,
           rotations, openStints: [...stintsRef.current.entries()], chosenGoalkeeperId,
         }
       : null,
@@ -1151,6 +1164,13 @@ export default function App() {
     } catch (e) { setSavedMatches([]); }
   }, []);
 
+  const deleteMatch = async (date) => {
+    try { await storage.del(`matches:${activeTeamId}:${date}`); } catch (e) {}
+    setConfirmDeleteMatch(null);
+    showToast("Partido borrado");
+    loadHistoryFor(activeTeamId);
+  };
+
   const loadTrainingHistoryFor = useCallback(async (teamId) => {
     try {
       const list = await storage.list(`trainings:${teamId}:`);
@@ -1231,6 +1251,7 @@ export default function App() {
     setOccAgainst(d.occAgainst || 0);
     setConvocados(d.convocados || null);
     setGoalEvents(d.goalEvents || []);
+    setDisciplineEvents(d.disciplineEvents || []);
     setLastGoalEvent(null);
     setLastEvent(null);
 
@@ -1407,6 +1428,10 @@ export default function App() {
 
   // `targetHalf` permite deshacer en la parte donde se anotó la acción, aunque
   // mientras tanto se haya empezado la siguiente.
+  // `bump` deja registro con minuto exacto de las faltas y tarjetas, igual
+  // que ya hacían los goles — de ahí sale la sección "Faltas y tarjetas" del
+  // resumen y del historial. El resto de acciones (tiros, pérdidas...) solo
+  // suman al contador, sin generar ese registro.
   const bump = (playerId, key, delta = 1, targetHalf = null) => {
     const h = targetHalf || halfRef.current;
     setStatsByHalf((prev) => {
@@ -1415,7 +1440,20 @@ export default function App() {
       halfMap[playerId] = { ...cur, [key]: Math.max(0, (cur[key] || 0) + delta) };
       return { ...prev, [h]: halfMap };
     });
-    if (delta > 0) setLastEvent({ playerId, key, half: h });
+    if (delta <= 0) return;
+    let discId = null;
+    if (DISCIPLINE_KEYS.has(key)) {
+      const player = players.find((p) => p.id === playerId);
+      const remainingNow = Math.max(0, halfLenRef.current * 60 - secondsRef.current);
+      const ev = {
+        id: `disc-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        playerId, playerName: player ? player.name : "?", playerNumber: player ? player.number : "?",
+        type: key, half: h, remaining: remainingNow,
+      };
+      discId = ev.id;
+      setDisciplineEvents((prev) => [...prev, ev]);
+    }
+    setLastEvent({ playerId, key, half: h, discId });
   };
 
   // Deshacer el último registro. El gol guarda su propio autor, así que
@@ -1434,6 +1472,7 @@ export default function App() {
       return;
     }
     if (!lastEvent) return;
+    if (lastEvent.discId) setDisciplineEvents((prev) => prev.filter((e) => e.id !== lastEvent.discId));
     bump(lastEvent.playerId, lastEvent.key, -1, lastEvent.half);
     setLastEvent(null);
     showToast("Acción deshecha");
@@ -1510,6 +1549,23 @@ export default function App() {
     saveDraftNow();
   };
 
+  // Corrige un gol ya registrado: quién marcó y de qué fase. Si cambia el
+  // autor, se le resta el gol a quien tenía antes y se le suma a quien
+  // corresponde ahora, en la misma parte en la que se marcó — no en la parte
+  // actual, que podría ser otra si el gol es de antes.
+  const saveGoalEdit = (patch) => {
+    if (!editingGoal) return;
+    const ev = editingGoal;
+    if (ev.type === "for" && patch.authorId && patch.authorId !== ev.authorId) {
+      if (ev.authorId) bump(ev.authorId, "goals", -1, ev.half);
+      bump(patch.authorId, "goals", 1, ev.half);
+    }
+    setGoalEvents((prev) => prev.map((e) => (e.id === ev.id ? { ...e, ...patch } : e)));
+    setEditingGoal(null);
+    showToast("Gol editado");
+    saveDraftNow();
+  };
+
   const armStatAction = (key, label) => {
     setActionsPopoverOpen(false);
     if (key === "saves") {
@@ -1577,7 +1633,7 @@ export default function App() {
     setOnCourt(startingFive); onCourtRef.current = startingFive;
     openStintsForCourt(startingFive, 1);
     setLastEvent(null);
-    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null);
+    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]);
     setConvocados(null);
     clearMatchDraft(activeTeamId);
   };
@@ -1618,7 +1674,7 @@ export default function App() {
     setOnCourt(startingFive); onCourtRef.current = startingFive;
     openStintsForCourt(startingFive, 1);
     setLastEvent(null);
-    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null);
+    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]);
     setConvocatoriaMode(null);
     setView("partido");
   };
@@ -1640,6 +1696,7 @@ export default function App() {
       // Desglose por parte, en el orden en que se jugaron.
       halves: halvesPresent(statsByHalf, goalEvents).map((h) => ({ half: h, players: rowsFrom(statsByHalf[h]) })),
       goalEvents, // additive: full history of who scored, from what phase, with the exact 5 on court at that moment
+      disciplineEvents, // additive: cada falta y tarjeta, con el minuto exacto en que se marcó
       convocados: convocadosList, // additive: who was called up for this match
       rotations: rotationsRef.current, // additive: cada entrada y salida de la pista de cada jugador
     };
@@ -1684,6 +1741,7 @@ export default function App() {
     setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setOccFor(0); setOccAgainst(0);
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setLastEvent(null); setLastGoalEvent(null); setGoalEvents([]); setConvocados(null);
+    setDisciplineEvents([]);
     setChosenGoalkeeperId(null);
     setTrainingSeconds(0);
     setLoading(true);
@@ -1765,8 +1823,8 @@ export default function App() {
                 </div>
 
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => setTrainingClockRunning(!trainingRunning)} style={{ ...bigBtn, background: trainingRunning ? T.negative : T.red, color: "#0A0A0A", fontSize: 15, padding: "13px 22px" }}>
-                    {trainingRunning ? <Pause size={20} /> : <Play size={20} />} {trainingRunning ? "Pausar" : "Iniciar"}
+                  <button onClick={() => setTrainingClockRunning(!trainingRunning)} style={{ ...bigBtn, background: trainingRunning ? T.negative : T.red, color: "#0A0A0A", fontSize: 19, fontWeight: 700, padding: "18px 30px", borderRadius: 14, gap: 10 }}>
+                    {trainingRunning ? <Pause size={26} /> : <Play size={26} />} {trainingRunning ? "Pausar" : "Iniciar"}
                   </button>
                   <button onClick={resetTraining} style={ghostBtn} title="Reiniciar sesión"><RotateCcw size={14} /> Reiniciar</button>
                 </div>
@@ -1820,8 +1878,8 @@ export default function App() {
 
               <ClockDial seconds={remaining} progress={halfProgress} running={running} half={half} />
 
-              <button onClick={() => { const next = !running; setClockRunning(next); if (next && !matchStartTime) setMatchStartTime(new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })); }} style={{ ...bigBtn, background: running ? T.negative : T.red, color: "#0A0A0A", fontSize: 15, padding: "13px 22px" }}>
-                {running ? <Pause size={20} /> : <Play size={20} />} {running ? "Pausar" : "Iniciar"}
+              <button onClick={() => { const next = !running; setClockRunning(next); if (next && !matchStartTime) setMatchStartTime(new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })); }} style={{ ...bigBtn, background: running ? T.negative : T.red, color: "#0A0A0A", fontSize: 19, fontWeight: 700, padding: "18px 30px", borderRadius: 14, gap: 10 }}>
+                {running ? <Pause size={26} /> : <Play size={26} />} {running ? "Pausar" : "Iniciar"}
               </button>
             </div>
             </>
@@ -1974,11 +2032,18 @@ export default function App() {
             matches={savedMatches} trainings={savedTrainings} teamName={activeTeam.name}
             subTab={historySubTab} onSubTabChange={setHistorySubTab}
             onExport={() => exportClubDataToExcel(savedMatches, savedTrainings, activeTeam.name)}
+            onDeleteMatch={setConfirmDeleteMatch}
           />
         )}
       </div>
 
-      {statP && <StatDrawer player={statP} stats={stats[statP.id] || emptyStats()} onClose={() => setStatPlayer(null)} onBump={(key, d) => bump(statP.id, key, d)} />}
+      {statP && (
+        <StatDrawer
+          player={statP} stats={stats[statP.id] || emptyStats()}
+          canSave={statP.isGK || statP.id === keeperOnCourtId}
+          onClose={() => setStatPlayer(null)} onBump={(key, d) => bump(statP.id, key, d)}
+        />
+      )}
 
       {cropTarget && <PhotoCropEditor src={cropTarget.src} onCancel={() => setCropTarget(null)} onSave={handleCropSave} />}
 
@@ -2054,10 +2119,15 @@ export default function App() {
 
       {summaryOpen && (
         <SummaryModal
-          players={sortedPlayers} stats={stats} statsByHalf={statsByHalf} goalEvents={goalEvents}
+          players={sortedPlayers} stats={stats} statsByHalf={statsByHalf} goalEvents={goalEvents} disciplineEvents={disciplineEvents}
           rotations={rotations} openStints={[...stintsRef.current.entries()]} currentRemaining={remaining}
           onClose={() => setSummaryOpen(false)}
+          onEditGoal={setEditingGoal}
         />
+      )}
+
+      {editingGoal && (
+        <GoalEditModal event={editingGoal} players={sortedPlayers} onSave={saveGoalEdit} onClose={() => setEditingGoal(null)} />
       )}
 
       {teamManagerOpen && (
@@ -2101,6 +2171,22 @@ export default function App() {
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => setConfirmEnd(false)} style={{ ...ghostBtn, flex: 1, justifyContent: "center" }}>Cancelar</button>
               <button onClick={finishMatch} style={{ ...bigBtn, flex: 1, justifyContent: "center", background: T.red, color: "#0A0A0A" }}>Guardar y finalizar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDeleteMatch && (
+        <div style={overlayStyle} onClick={() => setConfirmDeleteMatch(null)}>
+          <div style={{ ...modalCard, maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
+            <div className="oswald" style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>¿Borrar este partido?</div>
+            <div style={{ fontSize: 13, color: T.dim, marginBottom: 18 }}>
+              {confirmDeleteMatch.rivalName || "Rival"} · {new Date(confirmDeleteMatch.date).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })}.
+              Se borrará del historial de {activeTeam.name}, junto con sus estadísticas y goles. <strong style={{ color: T.negative }}>No se puede deshacer.</strong>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setConfirmDeleteMatch(null)} style={{ ...ghostBtn, flex: 1, justifyContent: "center" }}>Cancelar</button>
+              <button onClick={() => deleteMatch(confirmDeleteMatch.date)} style={{ ...bigBtn, flex: 1, justifyContent: "center", background: T.negative, color: T.white }}><Trash2 size={15} /> Borrar</button>
             </div>
           </div>
         </div>
@@ -2626,14 +2712,104 @@ function StatsTable({ players, statsMap }) {
   );
 }
 
-function GoalLine({ ev }) {
+function GoalLine({ ev, onEdit }) {
   return (
     <div style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, padding: "6px 10px", fontSize: 11 }}>
-      <span style={{ fontWeight: 700, color: ev.type === "for" ? T.red : T.negative }}>
-        {ev.type === "for" ? `⚽ ${ev.authorName}` : "⚽ Rival"}
-      </span>
-      {" · "}{ev.phase} · {fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+        <div>
+          <span style={{ fontWeight: 700, color: ev.type === "for" ? T.red : T.negative }}>
+            {ev.type === "for" ? `⚽ ${ev.authorName}` : "⚽ Rival"}
+          </span>
+          {" · "}{ev.phase} · {fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}
+        </div>
+        {onEdit && (
+          <button onClick={onEdit} title="Editar este gol" style={{ ...iconBtnSm, width: 20, height: 20, flexShrink: 0 }}>
+            <Settings size={11} />
+          </button>
+        )}
+      </div>
       <div style={{ color: T.dim, marginTop: 2 }}>Quinteto en pista: {(ev.onCourt || []).map((p) => `#${p.number} ${p.name}`).join(", ")}</div>
+    </div>
+  );
+}
+
+/* Editar un gol ya registrado: quién marcó (solo goles a favor) y de qué
+   fase vino. La media parte y el quinteto en pista quedan tal y como se
+   vieron en su momento — eso no se corrige, solo el autor y la fase. */
+function GoalEditModal({ event, players, onSave, onClose }) {
+  const [authorId, setAuthorId] = useState(event.authorId || null);
+  const [phase, setPhase] = useState(event.phase || null);
+  const isFor = event.type === "for";
+  return (
+    <div style={overlayStyle} onClick={onClose}>
+      <div style={{ ...modalCard, maxWidth: 460 }} onClick={(e) => e.stopPropagation()} className="fadein">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <div className="oswald" style={{ fontSize: 17, fontWeight: 600 }}>Editar gol</div>
+          <button onClick={onClose} style={iconBtnSm}><X size={16} /></button>
+        </div>
+        <div style={{ fontSize: 11, color: T.dim, margin: "6px 0 12px" }}>
+          {halfLabel(event.half)} · {fmtClock(event.remaining !== undefined ? event.remaining : event.seconds)} — esto no cambia, solo quién marcó y de qué fase.
+        </div>
+
+        {isFor && (
+          <>
+            <div style={{ fontSize: 11, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>¿Quién marcó?</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto", marginBottom: 14 }}>
+              {players.map((p) => (
+                <button key={p.id} onClick={() => setAuthorId(p.id)} style={{ display: "flex", alignItems: "center", gap: 10, background: authorId === p.id ? "rgba(230,57,70,0.18)" : T.surface2, border: `1.5px solid ${authorId === p.id ? T.red : T.line}`, borderRadius: 10, padding: "7px 10px", cursor: "pointer", textAlign: "left" }}>
+                  <Avatar player={p} size={30} />
+                  <span style={{ fontSize: 13, fontWeight: 600, flex: 1, color: T.text }}>{p.name}</span>
+                  <span className="oswald" style={{ fontSize: 16, fontWeight: 700, color: authorId === p.id ? T.red : T.dim }}>{p.number}</span>
+                  {authorId === p.id && <Check size={14} color={T.red} />}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        <div style={{ fontSize: 11, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>¿De qué fase?</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+          {GOAL_PHASES.map((ph) => (
+            <button key={ph.key} onClick={() => setPhase(ph.key)} style={{ background: phase === ph.key ? ph.color : "transparent", border: `1.5px solid ${ph.color}`, color: phase === ph.key ? "#0A0A0A" : ph.color, borderRadius: 10, padding: "10px 8px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+              {ph.label}
+            </button>
+          ))}
+        </div>
+
+        <button
+          disabled={(isFor && !authorId) || !phase}
+          onClick={() => {
+            const author = isFor ? players.find((p) => p.id === authorId) : null;
+            onSave({ authorId: isFor ? authorId : null, authorName: isFor ? (author ? author.name : "") : null, phase });
+          }}
+          style={{ ...bigBtn, justifyContent: "center", width: "100%", background: (isFor && !authorId) || !phase ? T.surface3 : T.red, color: (isFor && !authorId) || !phase ? T.dim : "#0A0A0A", cursor: (isFor && !authorId) || !phase ? "default" : "pointer" }}
+        >
+          Guardar cambios
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Cada falta (cometida o recibida) y cada tarjeta, con el minuto exacto en
+// que se marcó — orden cronológico, parte a parte.
+function DisciplineSection({ events }) {
+  if (!events || !events.length) return null;
+  const sorted = [...events].sort((a, b) => (a.half - b.half) || (b.remaining - a.remaining));
+  return (
+    <div style={{ marginTop: 22 }}>
+      <SectionHeading title="Faltas y tarjetas" />
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {sorted.map((ev) => (
+          <div key={ev.id} style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, padding: "6px 10px", fontSize: 11, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <span>
+              <span style={{ fontWeight: 700, color: DISCIPLINE_COLOR[ev.type] || T.text }}>{DISCIPLINE_LABEL[ev.type] || ev.type}</span>
+              {" · "}#{ev.playerNumber} {ev.playerName}
+            </span>
+            <span style={{ color: T.dim, flexShrink: 0 }}>{halfLabel(ev.half)} · {fmtClock(ev.remaining)}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2699,7 +2875,7 @@ function RotationsSection({ rotations }) {
 /* Resumen en tres bloques: 1ª parte, 2ª parte y total del partido. Cada parte
    lleva su propio marcador y sus goles, que es como se lee un partido de
    fútbol sala: casi siempre importa en qué mitad pasó cada cosa. */
-function SummaryModal({ players, stats, statsByHalf, goalEvents, rotations, openStints, currentRemaining, onClose }) {
+function SummaryModal({ players, stats, statsByHalf, goalEvents, disciplineEvents, rotations, openStints, currentRemaining, onClose, onEditGoal }) {
   const halves = halvesPresent(statsByHalf, goalEvents);
   // A las rotaciones ya cerradas se le suma, como fila "en curso", la de
   // quien sigue en pista en este momento — así el resumen a mitad de partido
@@ -2739,7 +2915,7 @@ function SummaryModal({ players, stats, statsByHalf, goalEvents, rotations, open
               <StatsTable players={players} statsMap={statsByHalf[h] || {}} />
               {goalsThisHalf.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-                  {goalsThisHalf.map((ev) => <GoalLine key={ev.id} ev={ev} />)}
+                  {goalsThisHalf.map((ev) => <GoalLine key={ev.id} ev={ev} onEdit={onEditGoal ? () => onEditGoal(ev) : null} />)}
                 </div>
               )}
             </div>
@@ -2751,6 +2927,7 @@ function SummaryModal({ players, stats, statsByHalf, goalEvents, rotations, open
           <StatsTable players={players} statsMap={stats} />
         </div>
 
+        <DisciplineSection events={disciplineEvents} />
         <RotationsSection rotations={liveRotations} />
       </div>
     </div>
@@ -3089,7 +3266,7 @@ function TrainingPlayerCard({ player, seconds, active, onToggle }) {
   );
 }
 
-function StatDrawer({ player, stats, onClose, onBump }) {
+function StatDrawer({ player, stats, canSave, onClose, onBump }) {
   return (
     <div style={overlayStyle} onClick={onClose}>
       <div style={{ ...modalCard, maxWidth: 420, maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()} className="fadein">
@@ -3109,7 +3286,9 @@ function StatDrawer({ player, stats, onClose, onBump }) {
           {STAT_DEFS.map((d) => (
             <StatButton key={d.key} def={d} value={stats[d.key] || 0} onInc={() => onBump(d.key, 1)} onDec={() => onBump(d.key, -1)} />
           ))}
-          {player.isGK && <StatButton def={{ key: "saves", label: "Parada", icon: Hand, color: T.red }} value={stats.saves || 0} onInc={() => onBump("saves", 1)} onDec={() => onBump("saves", -1)} />}
+          {/* Paradas: solo para quien puede pararlas — el portero de plantilla,
+              o quien esté ahora mismo jugando de portero-jugador. */}
+          {canSave && <StatButton def={{ key: "saves", label: "Parada", icon: Hand, color: T.red }} value={stats.saves || 0} onInc={() => onBump("saves", 1)} onDec={() => onBump("saves", -1)} />}
         </div>
       </div>
     </div>
@@ -3157,7 +3336,7 @@ function RosterEditor({ players, onAdd, onRemove, onSave, onNewFile, onReframe }
   );
 }
 
-function HistoryView({ matches, trainings, teamName, subTab, onSubTabChange, onExport }) {
+function HistoryView({ matches, trainings, teamName, subTab, onSubTabChange, onExport, onDeleteMatch }) {
   const [open, setOpen] = useState(null);
   const total = matches.length + trainings.length;
   return (
@@ -3186,6 +3365,7 @@ function HistoryView({ matches, trainings, teamName, subTab, onSubTabChange, onE
                 key={m.date} match={m} teamName={teamName}
                 isOpen={open === m.date}
                 onToggle={() => setOpen(open === m.date ? null : m.date)}
+                onDelete={() => onDeleteMatch(m)}
               />
             ))}
           </div>
@@ -3242,7 +3422,7 @@ function HistoryView({ matches, trainings, teamName, subTab, onSubTabChange, onE
 
 /* Ficha de un partido ya guardado. Igual que el resumen en directo, deja ver
    cada parte por separado o el total, sin apilar tres tablas en pantalla. */
-function SavedMatchCard({ match: m, teamName, isOpen, onToggle }) {
+function SavedMatchCard({ match: m, teamName, isOpen, onToggle, onDelete }) {
   const halves = halvesOf(m);
   const [tab, setTab] = useState("total");
   const scoreOf = (h) => { const s = halfScore(m, h); return `${s.favor}-${s.contra}`; };
@@ -3273,6 +3453,7 @@ function SavedMatchCard({ match: m, teamName, isOpen, onToggle }) {
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={() => exportSingleMatchToExcel(m, teamName)} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px" }}><FileSpreadsheet size={12} /> Excel</button>
               <button onClick={() => printMatchReport(m, teamName)} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px" }}><Save size={12} /> PDF</button>
+              <button onClick={(e) => { e.stopPropagation(); onDelete(); }} style={{ ...ghostBtn, fontSize: 11, padding: "5px 10px", borderColor: T.negative, color: T.negative }}><Trash2 size={12} /> Borrar</button>
             </div>
           </div>
 
@@ -3332,6 +3513,10 @@ function SavedMatchCard({ match: m, teamName, isOpen, onToggle }) {
               </div>
             </div>
           )}
+
+          {/* Igual que las rotaciones: faltas y tarjetas se muestran siempre
+              enteras, sin depender de la pestaña 1ª/2ª/Total de arriba. */}
+          <DisciplineSection events={m.disciplineEvents || []} />
 
           {/* Las rotaciones ya agrupan por parte, así que se muestran siempre
               enteras, sin depender de la pestaña 1ª/2ª/Total de arriba. */}

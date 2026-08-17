@@ -172,6 +172,22 @@ a cambiarse. Solo hay un portero en pista a la vez.
 
 **Parada**, en el panel de Acciones, se anota directa a quien esté ocupando el
 puesto de portero en ese momento — no hace falta tocar ningún jugador después.
+Solo puede anotarse a quien puede pararlas: el portero, o quien esté jugando
+de portero-jugador.
+
+### Faltas, tarjetas y goles
+
+Cada falta (cometida o recibida) y cada tarjeta quedan registradas con el
+minuto exacto en que se marcaron — se ven en **Resumen** (durante el partido)
+y en la ficha de cada partido del **Historial**, en la sección «Faltas y
+tarjetas».
+
+Un gol ya registrado se puede corregir desde **Resumen**: el icono de
+engranaje junto a cada gol deja cambiar quién marcó y de qué fase vino. Los
+minutos y el quinteto en pista no se tocan, solo el autor y la fase.
+
+Un partido guardado se puede borrar desde el **Historial**, con confirmación.
+No se puede deshacer.
 
 ### Detalles que conviene conocer
 
