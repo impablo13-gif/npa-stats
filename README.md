@@ -187,6 +187,14 @@ minuto exacto en que se marcaron — se ven en **Resumen** (durante el partido)
 y en la ficha de cada partido del **Historial**, en la sección «Faltas y
 tarjetas».
 
+Marcar un gol propio va **Autor → Fase → Asistencia → Zona de
+finalización**. La asistencia lleva un botón dedicado **Sin asistencia**,
+porque no todos los goles la llevan. La zona se marca en el mismo campo de
+nueve zonas que ya usan pérdidas, recuperaciones y tiros, y luego se ve
+junto a los tiros en el informe (en verde, para distinguirla de los tiros a
+puerta y fuera). Un gol del rival solo pide la fase — no tiene autor propio
+ni tiene sentido pedirle asistencia o zona.
+
 Un gol ya registrado se puede corregir: el icono de engranaje junto a cada
 gol deja cambiar quién marcó y de qué fase vino. Los minutos y el quinteto en
 pista no se tocan, solo el autor y la fase. Funciona igual durante el
@@ -229,10 +237,11 @@ en línea de tiempo, faltas y tarjetas — **pérdidas/recuperaciones, tarjetas,
 faltas cometidas y faltas recibidas, cada cosa en su propio dashboard**—,
 tiros (con gráfico por jugador y de proporción a puerta/fuera/gol),
 **campogramas de pérdidas, recuperaciones y tiros** (un punto por acción en
-la zona donde ocurrió — tocarlo enseña la foto del jugador y el minuto),
+la zona donde ocurrió — tocarlo enseña la foto del jugador y el minuto; los
+goles con zona marcada aparecen también ahí, en verde, junto a los tiros),
 goles según quién estaba en pista, quiénes coincidieron más tiempo juntos
-(parejas, tríos y cuartetos, con foto y nombre de cada uno) y una ficha por
-jugador. Arriba, el botón *Imprimir / Guardar como PDF* usa el diálogo de
+sin contar porteros (parejas, tríos y cuartetos, con foto y nombre de cada
+uno) y una ficha por jugador. Arriba, el botón *Imprimir / Guardar como PDF* usa el diálogo de
 impresión del navegador si hace falta un PDF, y *Cerrar* vuelve al
 Historial — pero no se abre solo, para no interrumpir con eso justo al
 pulsar *Crear informe*.

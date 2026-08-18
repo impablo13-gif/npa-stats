@@ -667,6 +667,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
         </div>
         <div style="font-size:10px; margin-top:5px; font-weight:700; color:${ev.type === "for" ? "#1a8f5e" : "#C0202E"};">
           ⚽ ${ev.type === "for" ? esc(ev.authorName || "") : "Gol del rival"}
+          ${ev.type === "for" && ev.assistName ? `<span style="font-weight:600; color:#2E9BD6;"> · 🅰 ${esc(ev.assistName)}</span>` : ""}
         </div>
       </div>`;
   };
@@ -863,7 +864,15 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const turnoverEvents = (match.zonedEvents || []).filter((ev) => ev.key === "turnovers");
   const recoveryEvents = (match.zonedEvents || []).filter((ev) => ev.key === "recoveries");
   const shotEvents = (match.zonedEvents || []).filter((ev) => ev.key === "shotsOn" || ev.key === "shotsOff");
-  const zonesPitchesHtml = (!turnoverEvents.length && !recoveryEvents.length && !shotEvents.length) ? "" : `${sectionTitle("🗺", "Campogramas")}
+  // La zona de finalización de los propios goles (si se marcó al anotarlos)
+  // se suma al mismo campograma de tiros, en verde -- para verlas junto al
+  // resto de tiros y no como un mapa aparte.
+  const goalZoneEvents = (match.goalEvents || []).filter((ev) => ev.type === "for" && ev.zone).map((ev) => {
+    const onCourtRow = (ev.onCourt || []).find((p) => p.id === ev.authorId);
+    return { key: "goal", zone: ev.zone, playerId: ev.authorId, playerName: ev.authorName, playerNumber: onCourtRow ? onCourtRow.number : "?", half: ev.half, remaining: ev.remaining };
+  });
+  const shotAndGoalEvents = [...shotEvents, ...goalZoneEvents];
+  const zonesPitchesHtml = (!turnoverEvents.length && !recoveryEvents.length && !shotAndGoalEvents.length) ? "" : `${sectionTitle("🗺", "Campogramas")}
     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
       <div style="border:1px solid #eee; border-radius:9px; padding:10px; break-inside:avoid;">
         <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; text-align:center; margin-bottom:8px;">Pérdidas</div>
@@ -874,8 +883,13 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
         ${miniPitchHtml(recoveryEvents, () => "#1a8f5e", "Sin recuperaciones registradas.")}
       </div>
       <div style="border:1px solid #eee; border-radius:9px; padding:10px; break-inside:avoid;">
-        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; text-align:center; margin-bottom:8px;">Tiros</div>
-        ${miniPitchHtml(shotEvents, (ev) => (ev.key === "shotsOn" ? "#2E9BD6" : "#E0A030"), "Sin tiros registrados.")}
+        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; text-align:center; margin-bottom:5px;">Tiros</div>
+        <div style="display:flex; justify-content:center; gap:8px; font-size:7px; color:#888; margin-bottom:6px;">
+          <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#2E9BD6;"></span> A puerta</span>
+          <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#E0A030;"></span> Fuera</span>
+          <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#1a8f5e;"></span> Gol</span>
+        </div>
+        ${miniPitchHtml(shotAndGoalEvents, (ev) => (ev.key === "goal" ? "#1a8f5e" : ev.key === "shotsOn" ? "#2E9BD6" : "#E0A030"), "Sin tiros registrados.")}
       </div>
     </div>`;
 
@@ -918,9 +932,14 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
         </div>
         <span style="font-weight:700; color:#2E9BD6; flex-shrink:0; font-size:11px;">${fmtMin(seconds)}</span>
       </div>`;
-  const pairs = topCombosTogether(match.rotations || [], 2, 4);
-  const trios = topCombosTogether(match.rotations || [], 3, 4);
-  const quartets = topCombosTogether(match.rotations || [], 4, 4);
+  // Los porteros no cuentan para "más minutos juntos" -- casi siempre están
+  // los 40 minutos en pista sin que eso diga nada táctico, y dominarían
+  // todas las combinaciones.
+  const gkIds = new Set(squadRows.filter((p) => p.isGK).map((p) => p.id));
+  const outfieldRotations = (match.rotations || []).filter((r) => !gkIds.has(r.playerId));
+  const pairs = topCombosTogether(outfieldRotations, 2, 4);
+  const trios = topCombosTogether(outfieldRotations, 3, 4);
+  const quartets = topCombosTogether(outfieldRotations, 4, 4);
   const pairingHtml = (!pairs.length && !trios.length && !quartets.length) ? `<div style="font-size:10px; color:#aaa;">No hay suficientes rotaciones para calcularlo.</div>` : `
       ${pairs.length ? `<div style="font-size:9px; font-weight:700; color:#999; text-transform:uppercase; margin:6px 0 2px;">Parejas</div>${pairs.map((r) => comboRow(r.combo, r.seconds)).join("")}` : ""}
       ${trios.length ? `<div style="font-size:9px; font-weight:700; color:#999; text-transform:uppercase; margin:6px 0 2px;">Tríos</div>${trios.map((r) => comboRow(r.combo, r.seconds)).join("")}` : ""}
@@ -1318,7 +1337,7 @@ export default function App() {
   // Null hasta el primer cambio de portero; se limpia solo si ese jugador
   // deja la pista.
   const [chosenGoalkeeperId, setChosenGoalkeeperId] = useState(null);
-  const [goalWizard, setGoalWizard] = useState(null); // { type: 'for'|'against', authorId, authorName } — mid-flow goal registration
+  const [goalWizard, setGoalWizard] = useState(null); // { type, authorId, authorName, phase, assistId, assistName, assistChosen, zone } — mid-flow goal registration
   const [convocados, setConvocados] = useState(null); // null = not set yet (show everyone); array of player ids once chosen
   const [convocatoriaMode, setConvocatoriaMode] = useState(null); // 'nuevo' | 'editar' | null
   const [goalEvents, setGoalEvents] = useState([]); // additive historical log: every goal with author/phase/on-court snapshot
@@ -2041,8 +2060,10 @@ export default function App() {
     if (lastGoalEvent) {
       const ev = lastGoalEvent;
       setGoalEvents((prev) => prev.filter((e) => e.id !== ev.id));
-      if (ev.type === "for" && ev.authorId) bump(ev.authorId, "goals", -1, ev.half);
-      else if (ev.type === "against") setRivalScore((v) => Math.max(0, v - 1));
+      if (ev.type === "for" && ev.authorId) {
+        bump(ev.authorId, "goals", -1, ev.half);
+        if (ev.assistId) bump(ev.assistId, "assists", -1, ev.half);
+      } else if (ev.type === "against") setRivalScore((v) => Math.max(0, v - 1));
       setLastGoalEvent(null);
       setLastEvent(null);
       showToast("Gol deshecho");
@@ -2088,42 +2109,69 @@ export default function App() {
   };
   const handleRivalCrestReframe = () => { if (rivalCrest) setCropTarget({ kind: "rivalCrest", id: null, src: rivalCrest }); };
 
-  // Goal registration — GOL → AUTOR → FASE (mandatory) → registro automático.
-  // GOL RIVAL → FASE (mandatory) → registro automático. Either way, the 5 players
-  // currently on court are captured at this exact instant from the single source of
-  // truth (`onCourt`) — never re-derived later, so history never drifts with later subs.
+  // Goal registration — GOL → AUTOR → FASE → ASISTENCIA (o "sin asistencia")
+  // → ZONA de finalización → registro automático. GOL RIVAL → FASE
+  // (obligatoria) → registro automático, sin asistencia ni zona (esa zona
+  // solo tiene sentido para los tiros propios, y es la que luego se ve en
+  // el campograma de "Tiros" del informe). En cualquier caso, los 5
+  // jugadores en pista se capturan en el instante exacto del gol desde la
+  // fuente única de verdad (`onCourt`) — nunca se recalculan después, así
+  // el historial no se desincroniza con sustituciones posteriores.
   const armGoal = () => { setActionsPopoverOpen(false); setPendingAction(null); setGoalWizard({ type: "for", authorId: null, authorName: null }); };
   const armRivalGoal = () => { setPendingAction(null); setGoalWizard({ type: "against", authorId: null, authorName: null }); };
   const cancelGoalWizard = () => setGoalWizard(null);
 
-  const finalizeGoal = (phaseKey) => {
-    if (!goalWizard) return;
+  const finalizeGoalEvent = (wizard) => {
     const onCourtSnapshot = players
       .filter((p) => onCourt.includes(p.id))
       .map((p) => ({ id: p.id, name: p.name, number: p.number }));
     const remainingAtGoal = Math.max(0, halfMinutesFor(half, halfLength) * 60 - seconds); // exactamente lo que marca el reloj ahora
+    const isFor = wizard.type === "for";
     const event = {
       id: `g${Date.now()}`,
-      type: goalWizard.type,
-      authorId: goalWizard.type === "for" ? goalWizard.authorId : null,
-      authorName: goalWizard.type === "for" ? goalWizard.authorName : null,
-      phase: phaseKey,
+      type: wizard.type,
+      authorId: isFor ? wizard.authorId : null,
+      authorName: isFor ? wizard.authorName : null,
+      assistId: isFor ? (wizard.assistId || null) : null,
+      assistName: isFor ? (wizard.assistName || null) : null,
+      phase: wizard.phase,
+      zone: isFor ? (wizard.zone || null) : null,
       half,
       remaining: remainingAtGoal,
       onCourt: onCourtSnapshot,
     };
     setGoalEvents((prev) => [...prev, event]);
-    setLastGoalEvent({ id: event.id, type: event.type, authorId: event.authorId });
+    setLastGoalEvent({ id: event.id, type: event.type, authorId: event.authorId, assistId: event.assistId });
 
-    if (goalWizard.type === "for") {
-      bump(goalWizard.authorId, "goals", 1);
-      showToast(`Gol de ${goalWizard.authorName} — ${phaseKey}`);
+    if (isFor) {
+      bump(wizard.authorId, "goals", 1);
+      if (wizard.assistId) bump(wizard.assistId, "assists", 1);
+      showToast(`Gol de ${wizard.authorName}${wizard.assistId ? ` — asist. ${wizard.assistName}` : ""} — ${wizard.phase}`);
     } else {
       setRivalScore((v) => v + 1);
-      showToast(`Gol rival — ${phaseKey}`);
+      showToast(`Gol rival — ${wizard.phase}`);
     }
     setGoalWizard(null);
     saveDraftNow();
+  };
+
+  // Fase elegida: si es gol rival ya está todo, se registra directamente.
+  // Si es propio, todavía faltan la asistencia y la zona de finalización.
+  const choosePhase = (phaseKey) => {
+    if (!goalWizard) return;
+    if (goalWizard.type === "against") { finalizeGoalEvent({ ...goalWizard, phase: phaseKey }); return; }
+    setGoalWizard({ ...goalWizard, phase: phaseKey });
+  };
+
+  // assistId/assistName llegan null cuando se pulsa "Sin asistencia".
+  const chooseAssist = (assistId, assistName) => {
+    if (!goalWizard) return;
+    setGoalWizard({ ...goalWizard, assistId: assistId || null, assistName: assistName || null, assistChosen: true });
+  };
+
+  const finalizeGoalZone = (zoneKey) => {
+    if (!goalWizard) return;
+    finalizeGoalEvent({ ...goalWizard, zone: zoneKey });
   };
 
   // Corrige un gol ya registrado: quién marcó y de qué fase. Si cambia el
@@ -2723,12 +2771,25 @@ export default function App() {
         <CardsPopover onPick={armCardAction} onClose={() => setCardsPopoverOpen(false)} />
       )}
 
-      {goalWizard && (goalWizard.type === "against" || goalWizard.authorId) && (
+      {goalWizard && (goalWizard.type === "against" || goalWizard.authorId) && !goalWizard.phase && (
         <GoalPhasePopover
           goalWizard={goalWizard}
-          onPick={finalizeGoal}
+          onPick={choosePhase}
           onClose={cancelGoalWizard}
         />
+      )}
+
+      {goalWizard && goalWizard.type === "for" && goalWizard.phase && !goalWizard.assistChosen && (
+        <AssistPopover
+          goalWizard={goalWizard}
+          players={players.filter((p) => onCourt.includes(p.id) && p.id !== goalWizard.authorId)}
+          onPick={chooseAssist}
+          onClose={cancelGoalWizard}
+        />
+      )}
+
+      {goalWizard && goalWizard.type === "for" && goalWizard.assistChosen && (
+        <PitchZonePicker wizard={{ label: "Gol", playerName: goalWizard.authorName }} onPick={finalizeGoalZone} onClose={cancelGoalWizard} />
       )}
 
       {zonedActionWizard && zonedActionWizard.playerId && (
@@ -3204,6 +3265,38 @@ function GoalPhasePopover({ goalWizard, onPick, onClose }) {
   );
 }
 
+// Tras la fase, se pregunta quién dio la asistencia — con un botón dedicado
+// para "Sin asistencia" porque muchos goles no la llevan, y no debe hacer
+// falta un jugador de relleno para poder seguir.
+function AssistPopover({ goalWizard, players, onPick, onClose }) {
+  return (
+    <div style={overlayStyle} onClick={onClose}>
+      <div style={{ ...modalCard, maxWidth: 460 }} onClick={(e) => e.stopPropagation()} className="fadein">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <div>
+            <div style={{ fontSize: 11, color: T.dim }}>Gol de {goalWizard.authorName}</div>
+            <div className="oswald" style={{ fontSize: 17, fontWeight: 600 }}>¿Quién dio la asistencia?</div>
+          </div>
+          <button onClick={onClose} style={iconBtnSm}><X size={16} /></button>
+        </div>
+
+        <button onClick={() => onPick(null, null)} style={{ ...ghostBtn, width: "100%", justifyContent: "center", margin: "10px 0 12px" }}>Sin asistencia</button>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto" }}>
+          {players.map((p) => (
+            <button key={p.id} onClick={() => onPick(p.id, p.name)} style={{ display: "flex", alignItems: "center", gap: 10, background: T.surface2, border: `1.5px solid ${T.line}`, borderRadius: 10, padding: "7px 10px", cursor: "pointer", textAlign: "left" }}>
+              <Avatar player={p} size={30} />
+              <span style={{ fontSize: 13, fontWeight: 600, flex: 1, color: T.text }}>{p.name}</span>
+              <span className="oswald" style={{ fontSize: 16, fontWeight: 700, color: T.dim }}>{p.number}</span>
+            </button>
+          ))}
+          {!players.length && <div style={{ fontSize: 12, color: T.dim, textAlign: "center", padding: "8px 0" }}>No hay más compañeros en pista.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* Campo visual para marcar la zona de una pérdida, recuperación o tiro:
    la portería propia siempre abajo, la rival arriba — como se ve el campo
    de pie en la banda. Nueve zonas grandes, pensadas para tocar con el dedo
@@ -3463,6 +3556,7 @@ function GoalLine({ ev, onEdit }) {
             {ev.type === "for" ? `⚽ ${ev.authorName}` : "⚽ Rival"}
           </span>
           {" · "}{ev.phase} · {fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}
+          {ev.assistName ? ` · 🅰 ${ev.assistName}` : ""}
         </div>
         {onEdit && (
           <button onClick={onEdit} title="Editar este gol" style={{ ...iconBtnSm, width: 20, height: 20, flexShrink: 0 }}>
@@ -4371,6 +4465,7 @@ function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, 
                           {ev.type === "for" ? `⚽ ${ev.authorName}` : "⚽ Rival"}
                         </span>
                         {" · "}{ev.phase} · {halfLabel(ev.half)} · {fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}
+                        {ev.assistName ? ` · 🅰 ${ev.assistName}` : ""}
                       </div>
                       <button onClick={() => onEditGoal(ev)} title="Editar este gol" style={{ ...iconBtnSm, width: 20, height: 20, flexShrink: 0 }}>
                         <Settings size={11} />
