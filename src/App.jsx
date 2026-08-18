@@ -1060,8 +1060,14 @@ function MatchReportView({ html, title, onClose }) {
     <div className="match-report-view" style={{ position: "fixed", inset: 0, zIndex: 300, background: "#f2f2f2", overflowY: "auto" }}>
       <style>{`
         @media print {
-          body > *:not(.match-report-view) { display: none !important; }
-          .match-report-view { position: static !important; background: #fff !important; }
+          /* .match-report-view no es hija directa de <body> (va dentro de
+             #root), así que ocultar "los demás hijos de body" no basta --
+             hay que ocultar TODO por visibilidad y volver a mostrar solo
+             esto, que es lo que de verdad no depende de dónde cuelga en el
+             árbol. Sin este ajuste, "Guardar como PDF" salía en blanco. */
+          body * { visibility: hidden !important; }
+          .match-report-view, .match-report-view * { visibility: visible !important; }
+          .match-report-view { position: absolute !important; top: 0; left: 0; width: 100%; background: #fff !important; }
           .match-report-view .report-toolbar { display: none !important; }
         }
       `}</style>
