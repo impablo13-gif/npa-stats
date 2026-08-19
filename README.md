@@ -173,7 +173,10 @@ campo).
 
 Si se elige a un jugador de campo — típico en situaciones de 5x4 — queda
 marcado como **PORTERO·JUGADOR**, con la misma tarjeta azul, hasta que vuelva
-a cambiarse. Solo hay un portero en pista a la vez.
+a cambiarse. Solo hay un portero en pista a la vez: si en la plantilla hay
+más de uno (titular y suplente), la app no deja meter al segundo mientras el
+primero siga en pista con la posición de portero — avisa y no hace el
+cambio.
 
 **Parada**, en el panel de Acciones, se anota directa a quien esté ocupando el
 puesto de portero en ese momento — no hace falta tocar ningún jugador después.
@@ -205,6 +208,15 @@ correspondiente en ese partido guardado.
 Un partido guardado se puede borrar desde el **Historial**, con confirmación.
 No se puede deshacer.
 
+**Dos amarillas del mismo jugador equivalen a una roja** — se anota sola,
+sin tocar nada más. Una roja (directa o por doble amarilla) expulsa al
+jugador el resto del partido: si estaba en pista sale ya mismo, y desaparece
+de la pantalla de rotaciones (sus minutos, goles y tarjetas siguen intactos
+en Resumen, Historial, Excel e informe — solo deja de poder gestionarse en
+directo, porque ya no puede jugar). El equipo pasa a jugar con uno menos —
+un aviso rojo lo deja claro y el máximo en pista baja en consecuencia — hasta
+que pasen 2 minutos de juego o el rival marque, lo que ocurra antes.
+
 ### Pérdidas, recuperaciones, tiros y faltas por zona
 
 Al anotar una pérdida, una recuperación, un tiro (a puerta o fuera) o una
@@ -234,22 +246,25 @@ propia app**, con foto de cada jugador: minutos y rotaciones agrupados por
 posición, un **top 5 de minutos en pista** con barra y podio (sin contar
 porteros), los goles de cada parte con el quinteto en pista, una cronología
 en línea de tiempo, faltas y tarjetas — **pérdidas/recuperaciones, tarjetas,
-faltas cometidas y faltas recibidas, cada cosa en su propio dashboard**—,
+faltas cometidas y faltas recibidas, cada cosa en su propio dashboard** —,
 tiros (con gráfico por jugador y de proporción a puerta/fuera/gol),
-**campogramas de pérdidas, recuperaciones y tiros** (un punto por acción en
-la zona donde ocurrió — tocarlo enseña la foto del jugador y el minuto; los
-goles con zona marcada aparecen también ahí, en verde, junto a los tiros),
-goles según quién estaba en pista, quiénes coincidieron más tiempo juntos
-sin contar porteros (parejas, tríos y cuartetos, con foto y nombre de cada
-uno) y una ficha por jugador. Arriba, el botón *Imprimir / Guardar como PDF* usa el diálogo de
-impresión del navegador si hace falta un PDF, y *Cerrar* vuelve al
-Historial — pero no se abre solo, para no interrumpir con eso justo al
-pulsar *Crear informe*.
+**un campograma por cada tipo de tiro** (a puerta, fuera y gol, con la zona
+de finalización) **y, debajo, uno igual para pérdidas y recuperaciones** —
+cada jugador con foto, nombre y ×veces que actuó en esa zona, siempre a la
+vista sin tener que tocar nada —, goles según quién estaba en pista, quiénes
+coincidieron más tiempo juntos sin contar porteros (parejas, tríos y
+cuartetos, con foto y nombre de cada uno) y una ficha por jugador.
+
+Arriba hay dos formas de sacarlo: **Exportar a PDF** descarga el archivo
+directamente (en varias tablets, el diálogo de impresión no deja guardar
+como PDF de forma sencilla, así que este botón se salta ese paso), e
+*Imprimir* usa el diálogo de impresión del navegador para quien lo prefiera.
+*Cerrar* vuelve al Historial. Nada de esto se dispara solo, para no
+interrumpir justo al pulsar *Crear informe*.
 
 Se muestra dentro de la propia app, no en una pestaña o ventana nueva, a
 propósito: instalada en la tablet (sin barra de pestañas del navegador),
-`window.open()` no es fiable y puede no hacer nada. Se genera entero sin
-conexión y sin depender de ninguna librería externa.
+`window.open()` no es fiable y puede no hacer nada.
 
 ### Detalles que conviene conocer
 

@@ -836,60 +836,68 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
       <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">${donutHtml}</div>
     </div>`;
 
-  /* ---- Campogramas: dónde pasó cada pérdida, recuperación y tiro -- un
-     punto por acción, y tocándolo se ve el minuto y la cara de quién la
-     hizo. Con <details>/<summary> nativos no hace falta JavaScript (el
-     informe no lo ejecuta), así que funciona igual sin conexión. ---- */
-  const miniPitchHtml = (events, colorFn, emptyLabel) => {
+  /* ---- Campogramas: dónde pasó cada tiro, pérdida y recuperación. Estático
+     a propósito (sin desplegable ni JavaScript): un jugador con varias
+     acciones en la misma zona sale una vez, con foto, nombre y ×veces --
+     así se ve todo de un vistazo y no complica rasterizar la página para
+     el PDF. Un campograma por tipo de tiro (a puerta / fuera / gol), y
+     debajo, con el mismo formato, pérdidas y recuperaciones. ---- */
+  const miniPitchHtml = (events, color, emptyLabel) => {
     if (!events.length) return `<div style="font-size:10px; color:#aaa; text-align:center; padding:24px 0;">${esc(emptyLabel)}</div>`;
     const byZone = new Map();
-    events.forEach((ev) => { if (!byZone.has(ev.zone)) byZone.set(ev.zone, []); byZone.get(ev.zone).push(ev); });
+    events.forEach((ev) => {
+      if (!byZone.has(ev.zone)) byZone.set(ev.zone, new Map());
+      const byPlayer = byZone.get(ev.zone);
+      const key = ev.playerId || ev.playerName;
+      if (!byPlayer.has(key)) byPlayer.set(key, { ev, count: 0 });
+      byPlayer.get(key).count++;
+    });
     const cellsHtml = PITCH_ZONES.map((z) => {
-      const evs = byZone.get(z.key) || [];
-      const dotsHtml = evs.map((ev, i) => {
-        const offset = evs.length > 1 ? Math.round((i - (evs.length - 1) / 2) * 16) : 0;
-        return `<details style="position:absolute; left:calc(50% + ${offset}px); top:50%; margin:0;">
-            <summary style="list-style:none; width:13px; height:13px; margin:-7px 0 0 -7px; border-radius:50%; background:${colorFn(ev)}; border:2px solid #fff; box-shadow:0 0 0 1px rgba(0,0,0,0.25); cursor:pointer;"></summary>
-            <div style="position:absolute; z-index:5; top:13px; left:50%; transform:translateX(-50%); background:#1a1a1a; color:#fff; border-radius:8px; padding:5px 8px; display:flex; align-items:center; gap:6px; white-space:nowrap; box-shadow:0 4px 10px rgba(0,0,0,0.35);">
-              ${avatarImg({ id: ev.playerId, name: ev.playerName, number: ev.playerNumber }, 20)}
-              <div style="text-align:left;"><div style="font-size:9px; font-weight:700;">${esc(ev.playerName)}</div><div style="font-size:8px; opacity:0.8;">${esc(halfLabel(ev.half))} · ${fmtClock(ev.remaining)}</div></div>
-            </div>
-          </details>`;
-      }).join("");
-      return `<div style="position:relative; border:1px solid rgba(255,255,255,0.35);">${dotsHtml}</div>`;
+      const byPlayer = byZone.get(z.key);
+      const chipsHtml = byPlayer ? [...byPlayer.values()].map(({ ev, count }) => `
+          <div style="display:flex; flex-direction:column; align-items:center; margin:2px;">
+            ${avatarImg({ id: ev.playerId, name: ev.playerName, number: ev.playerNumber }, 20)}
+            <div style="font-size:6px; font-weight:700; color:#333; max-width:32px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc((ev.playerName || "").split(" ")[0])}</div>
+            <div style="font-size:7px; font-weight:800; color:${color};">×${count}</div>
+          </div>`).join("") : "";
+      return `<div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,0.35); min-height:58px; padding:2px;">${chipsHtml}</div>`;
     }).join("");
-    return `<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:2px; background:#2e8f57; border-radius:8px; padding:2px; aspect-ratio:1/1.2; max-width:230px; margin:0 auto;">${cellsHtml}</div>
-      <div style="text-align:center; font-size:8px; color:#999; margin-top:5px;">Vuestra portería abajo · toca un punto para ver quién y cuándo</div>`;
+    return `<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:2px; background:#2e8f57; border-radius:8px; padding:2px; aspect-ratio:1/1.15; max-width:230px; margin:0 auto;">${cellsHtml}</div>
+      <div style="text-align:center; font-size:8px; color:#999; margin-top:5px;">Vuestra portería abajo</div>`;
   };
   const turnoverEvents = (match.zonedEvents || []).filter((ev) => ev.key === "turnovers");
   const recoveryEvents = (match.zonedEvents || []).filter((ev) => ev.key === "recoveries");
-  const shotEvents = (match.zonedEvents || []).filter((ev) => ev.key === "shotsOn" || ev.key === "shotsOff");
+  const shotOnEvents = (match.zonedEvents || []).filter((ev) => ev.key === "shotsOn");
+  const shotOffEvents = (match.zonedEvents || []).filter((ev) => ev.key === "shotsOff");
   // La zona de finalización de los propios goles (si se marcó al anotarlos)
-  // se suma al mismo campograma de tiros, en verde -- para verlas junto al
-  // resto de tiros y no como un mapa aparte.
+  // se pinta como un campograma más, junto a los otros dos tipos de tiro.
   const goalZoneEvents = (match.goalEvents || []).filter((ev) => ev.type === "for" && ev.zone).map((ev) => {
     const onCourtRow = (ev.onCourt || []).find((p) => p.id === ev.authorId);
-    return { key: "goal", zone: ev.zone, playerId: ev.authorId, playerName: ev.authorName, playerNumber: onCourtRow ? onCourtRow.number : "?", half: ev.half, remaining: ev.remaining };
+    return { zone: ev.zone, playerId: ev.authorId, playerName: ev.authorName, playerNumber: onCourtRow ? onCourtRow.number : "?", half: ev.half, remaining: ev.remaining };
   });
-  const shotAndGoalEvents = [...shotEvents, ...goalZoneEvents];
-  const zonesPitchesHtml = (!turnoverEvents.length && !recoveryEvents.length && !shotAndGoalEvents.length) ? "" : `${sectionTitle("🗺", "Campogramas")}
+  const zonesPitchesHtml = (!shotOnEvents.length && !shotOffEvents.length && !goalZoneEvents.length && !turnoverEvents.length && !recoveryEvents.length) ? "" : `${sectionTitle("🗺", "Campogramas")}
     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
       <div style="border:1px solid #eee; border-radius:9px; padding:10px; break-inside:avoid;">
-        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; text-align:center; margin-bottom:8px;">Pérdidas</div>
-        ${miniPitchHtml(turnoverEvents, () => "#C0202E", "Sin pérdidas registradas.")}
+        <div style="font-size:10px; font-weight:700; color:#2E9BD6; text-transform:uppercase; text-align:center; margin-bottom:8px;">Tiros a puerta</div>
+        ${miniPitchHtml(shotOnEvents, "#2E9BD6", "Sin tiros a puerta.")}
       </div>
       <div style="border:1px solid #eee; border-radius:9px; padding:10px; break-inside:avoid;">
-        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; text-align:center; margin-bottom:8px;">Recuperaciones</div>
-        ${miniPitchHtml(recoveryEvents, () => "#1a8f5e", "Sin recuperaciones registradas.")}
+        <div style="font-size:10px; font-weight:700; color:#E0A030; text-transform:uppercase; text-align:center; margin-bottom:8px;">Tiros fuera</div>
+        ${miniPitchHtml(shotOffEvents, "#E0A030", "Sin tiros fuera.")}
       </div>
       <div style="border:1px solid #eee; border-radius:9px; padding:10px; break-inside:avoid;">
-        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; text-align:center; margin-bottom:5px;">Tiros</div>
-        <div style="display:flex; justify-content:center; gap:8px; font-size:7px; color:#888; margin-bottom:6px;">
-          <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#2E9BD6;"></span> A puerta</span>
-          <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#E0A030;"></span> Fuera</span>
-          <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#1a8f5e;"></span> Gol</span>
-        </div>
-        ${miniPitchHtml(shotAndGoalEvents, (ev) => (ev.key === "goal" ? "#1a8f5e" : ev.key === "shotsOn" ? "#2E9BD6" : "#E0A030"), "Sin tiros registrados.")}
+        <div style="font-size:10px; font-weight:700; color:#1a8f5e; text-transform:uppercase; text-align:center; margin-bottom:8px;">Goles</div>
+        ${miniPitchHtml(goalZoneEvents, "#1a8f5e", "Sin goles con zona marcada.")}
+      </div>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:14px;">
+      <div style="border:1px solid #eee; border-radius:9px; padding:10px; break-inside:avoid;">
+        <div style="font-size:10px; font-weight:700; color:#C0202E; text-transform:uppercase; text-align:center; margin-bottom:8px;">Pérdidas</div>
+        ${miniPitchHtml(turnoverEvents, "#C0202E", "Sin pérdidas registradas.")}
+      </div>
+      <div style="border:1px solid #eee; border-radius:9px; padding:10px; break-inside:avoid;">
+        <div style="font-size:10px; font-weight:700; color:#1a8f5e; text-transform:uppercase; text-align:center; margin-bottom:8px;">Recuperaciones</div>
+        ${miniPitchHtml(recoveryEvents, "#1a8f5e", "Sin recuperaciones registradas.")}
       </div>
     </div>`;
 
@@ -1049,13 +1057,75 @@ function matchReportTitle(match, teamName) {
   return `${esc(teamName || "Equipo")} vs ${esc(match.rivalName || "Rival")} — ${esc(dateLabel)}`;
 }
 
+// Descarga el informe como .pdf de verdad, sin pasar por el diálogo de
+// impresión del navegador -- en muchas tablets ese diálogo no tiene forma
+// directa de "guardar como PDF" (o solo lo tiene tras varios pasos
+// escondidos), así que esto es un botón aparte. Se renderiza el mismo HTML
+// del informe fuera de la vista, se rasteriza con html2canvas -- así los
+// campogramas y el resto del diseño salen pixel a pixel iguales -- y esa
+// captura se trocea en páginas A4 dentro del PDF.
+async function exportReportToPdf(html, fileName) {
+  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
+
+  const RENDER_WIDTH = 900; // px — el mismo max-width que ya usaba el informe en pantalla
+  const container = document.createElement("div");
+  container.style.cssText = `position:fixed; left:-10000px; top:0; width:${RENDER_WIDTH}px; background:#fff;`;
+  container.innerHTML = html;
+  document.body.appendChild(container);
+
+  try {
+    const imgs = Array.from(container.querySelectorAll("img"));
+    await Promise.all(imgs.map((img) => (img.complete ? Promise.resolve() : new Promise((res) => { img.onload = res; img.onerror = res; }))));
+
+    const fullCanvas = await html2canvas(container, { scale: 2, backgroundColor: "#ffffff", useCORS: true, width: RENDER_WIDTH, windowWidth: RENDER_WIDTH });
+
+    const pdf = new jsPDF({ unit: "pt", format: "a4" });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const scaleFactor = pageWidth / fullCanvas.width;
+    const sliceHeightPx = Math.max(1, Math.floor(pageHeight / scaleFactor));
+
+    let renderedPx = 0;
+    let firstPage = true;
+    while (renderedPx < fullCanvas.height) {
+      const sliceHeight = Math.min(sliceHeightPx, fullCanvas.height - renderedPx);
+      const sliceCanvas = document.createElement("canvas");
+      sliceCanvas.width = fullCanvas.width;
+      sliceCanvas.height = sliceHeight;
+      const ctx = sliceCanvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, sliceCanvas.width, sliceHeight);
+      ctx.drawImage(fullCanvas, 0, renderedPx, fullCanvas.width, sliceHeight, 0, 0, fullCanvas.width, sliceHeight);
+      const imgData = sliceCanvas.toDataURL("image/jpeg", 0.92);
+      if (!firstPage) pdf.addPage();
+      pdf.addImage(imgData, "JPEG", 0, 0, pageWidth, sliceHeight * scaleFactor);
+      renderedPx += sliceHeight;
+      firstPage = false;
+    }
+
+    pdf.save(fileName);
+  } finally {
+    document.body.removeChild(container);
+  }
+}
+
 // Muestra el informe a pantalla completa DENTRO de la propia app -- una PWA
 // instalada (sin barra de pestañas) no puede fiarse de window.open(): en
 // modo standalone, la mayoría de navegadores lo ignoran o lo bloquean sin
 // avisar, que es justo por lo que antes "no generaba nada" en la tablet.
-// Desde aquí, "Imprimir / Guardar como PDF" llama a window.print(), que sí
-// funciona igual dentro de una PWA instalada.
-function MatchReportView({ html, title, onClose }) {
+// Desde aquí, "Imprimir" llama a window.print() (funciona igual instalada
+// en la tablet), y "Exportar a PDF" descarga el archivo directamente --
+// separado a propósito, porque en varias tablets el diálogo de impresión
+// no deja guardar como PDF de forma sencilla.
+function MatchReportView({ html, title, fileName, onExportError, onClose }) {
+  const [exporting, setExporting] = useState(false);
+  const handleExportPdf = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try { await exportReportToPdf(html, fileName || "informe.pdf"); }
+    catch (e) { if (onExportError) onExportError(); }
+    setExporting(false);
+  };
   return (
     <div className="match-report-view" style={{ position: "fixed", inset: 0, zIndex: 300, background: "#f2f2f2", overflowY: "auto" }}>
       <style>{`
@@ -1074,7 +1144,8 @@ function MatchReportView({ html, title, onClose }) {
       <div className="report-toolbar" style={{ position: "sticky", top: 0, zIndex: 1, background: "#1a1a1a", color: "#fff", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontFamily: "Arial, Helvetica, sans-serif" }}>
         <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
         <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-          <button onClick={() => window.print()} style={{ background: "#C0202E", color: "#fff", border: "none", borderRadius: 6, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Imprimir / Guardar como PDF</button>
+          <button onClick={handleExportPdf} disabled={exporting} style={{ background: "#C0202E", color: "#fff", border: "none", borderRadius: 6, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: exporting ? "default" : "pointer", opacity: exporting ? 0.7 : 1 }}>{exporting ? "Generando…" : "Exportar a PDF"}</button>
+          <button onClick={() => window.print()} style={{ background: "transparent", color: "#fff", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 6, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Imprimir</button>
           <button onClick={onClose} style={{ background: "transparent", color: "#fff", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 6, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Cerrar</button>
         </div>
       </div>
@@ -1344,6 +1415,11 @@ export default function App() {
   // deja la pista.
   const [chosenGoalkeeperId, setChosenGoalkeeperId] = useState(null);
   const [goalWizard, setGoalWizard] = useState(null); // { type, authorId, authorName, phase, assistId, assistName, assistChosen, zone } — mid-flow goal registration
+  // Cada roja (directa o por doble amarilla) añade una entrada aquí: 2
+  // minutos de juego con uno menos, o hasta que el rival marque — lo que
+  // pase antes. Simplificado a la parte en la que se pitó: si cambia la
+  // parte antes de cumplirse, se da por resuelta (un caso raro de por sí).
+  const [shortHandedRestrictions, setShortHandedRestrictions] = useState([]);
   const [convocados, setConvocados] = useState(null); // null = not set yet (show everyone); array of player ids once chosen
   const [convocatoriaMode, setConvocatoriaMode] = useState(null); // 'nuevo' | 'editar' | null
   const [goalEvents, setGoalEvents] = useState([]); // additive historical log: every goal with author/phase/on-court snapshot
@@ -1587,7 +1663,7 @@ export default function App() {
           v: DRAFT_VERSION, savedAt: new Date().toISOString(),
           seconds, half, halfLength, rivalName, rivalScore, rivalCrest, venue, matchStartTime,
           occFor, occAgainst, onCourt, convocados, goalEvents, disciplineEvents, zonedEvents, statsByHalf,
-          rotations, openStints: [...stintsRef.current.entries()], chosenGoalkeeperId,
+          rotations, openStints: [...stintsRef.current.entries()], chosenGoalkeeperId, shortHandedRestrictions,
         }
       : null,
     training: trainingInProgress
@@ -1758,7 +1834,8 @@ export default function App() {
   const generateReport = (patch) => {
     const updated = { ...reportMetaFor, ...patch };
     const html = buildMatchReportHtml(updated, activeTeam.name, players, activeTeam.crest);
-    setViewingReport({ html, title: matchReportTitle(updated, activeTeam.name) });
+    const fileName = `${sanitizeFileName(activeTeam.name) || "equipo"}_${dateLabelOf(updated.date)}_vs_${sanitizeFileName(updated.rivalName) || "rival"}_informe.pdf`;
+    setViewingReport({ html, title: matchReportTitle(updated, activeTeam.name), fileName });
     const toSave = { ...updated, reportHtml: html, reportGeneratedAt: new Date().toISOString() };
     storage.set(`matches:${activeTeamId}:${updated.date}`, JSON.stringify(toSave)).catch(() => {});
     loadHistoryFor(activeTeamId);
@@ -1847,6 +1924,7 @@ export default function App() {
     setGoalEvents(d.goalEvents || []);
     setDisciplineEvents(d.disciplineEvents || []);
     setZonedEvents(d.zonedEvents || []);
+    setShortHandedRestrictions(d.shortHandedRestrictions || []);
     setLastGoalEvent(null);
     setLastEvent(null);
 
@@ -1955,6 +2033,20 @@ export default function App() {
     try { await storage.set(`roster:${activeTeamId}`, JSON.stringify(list)); } catch (e) {}
   }, [activeTeamId]);
 
+  // De plantilla puede haber más de un portero (titular + suplente) — pero
+  // en pista, a la vez, solo uno con la posición de portero. El portero
+  // "extra" para 5x4 entra como jugador de campo (portero-jugador), no
+  // ocupando también la posición de portero.
+  const wouldDoubleGoalkeeper = (incomingId, excludeIds = []) => {
+    const incoming = players.find((p) => p.id === incomingId);
+    if (!incoming || incoming.position !== "POR") return false;
+    return onCourt.some((id) => {
+      if (id === incomingId || excludeIds.includes(id)) return false;
+      const p = players.find((pp) => pp.id === id);
+      return p && p.position === "POR";
+    });
+  };
+
   const toggleCourt = (id) => {
     commitTime(); // liquida el tiempo del quinteto anterior antes de cambiarlo
     if (onCourt.includes(id)) {
@@ -1962,7 +2054,8 @@ export default function App() {
       setOnCourt((prev) => prev.filter((x) => x !== id));
       return;
     }
-    if (onCourt.length >= 5) { showToast("Ya hay 5 en pista — saca a alguien primero"); return; }
+    if (onCourt.length >= maxOnCourt) { showToast(`Ya hay ${maxOnCourt} en pista — saca a alguien primero`); return; }
+    if (wouldDoubleGoalkeeper(id)) { showToast("Ya hay un portero en pista"); return; }
     openStint(id, halfRef.current);
     setOnCourt((prev) => [...prev, id]);
   };
@@ -1991,7 +2084,7 @@ export default function App() {
       toggleCourt(player.id);
       return;
     }
-    if (onCourt.length < 5) { toggleCourt(player.id); return; }
+    if (onCourt.length < maxOnCourt) { toggleCourt(player.id); return; }
     setSubPickerFor(player);
   };
 
@@ -2020,6 +2113,10 @@ export default function App() {
   const doSubstitution = (outgoingId) => {
     if (!subPickerFor) return;
     const incoming = subPickerFor;
+    if (outgoingId !== keeperOnCourtId && wouldDoubleGoalkeeper(incoming.id, [outgoingId])) {
+      showToast("Ya hay un portero en pista");
+      return;
+    }
     commitTime();
     closeStint(outgoingId);
     openStint(incoming.id, halfRef.current);
@@ -2060,6 +2157,30 @@ export default function App() {
       };
       discId = ev.id;
       setDisciplineEvents((prev) => [...prev, ev]);
+
+      // Regla del fútbol sala: la segunda amarilla del mismo jugador en el
+      // partido equivale a una roja -- se anota sola. Se dispara después de
+      // que esta llamada termine (setLastEvent incluido) para que "Deshacer"
+      // quite primero la roja automática y, si se pulsa otra vez, la amarilla.
+      if (key === "yellow") {
+        const priorYellows = Object.values(statsByHalf).reduce((s, hm) => s + ((hm[playerId] && hm[playerId].yellow) || 0), 0);
+        if (priorYellows + 1 === 2) {
+          showToast(`${player ? player.name : "Jugador"} — segunda amarilla = roja, expulsado`);
+          setTimeout(() => bump(playerId, "red", 1, h), 0);
+        }
+      }
+
+      // Roja (directa o por doble amarilla): el jugador queda expulsado el
+      // resto del partido -- si estaba en pista, sale ya mismo -- y el
+      // equipo juega con uno menos 2 minutos de juego o hasta que el rival
+      // marque (lo que pase antes).
+      if (key === "red") {
+        if (onCourtRef.current.includes(playerId)) {
+          closeStint(playerId);
+          setOnCourt((prev) => prev.filter((x) => x !== playerId));
+        }
+        setShortHandedRestrictions((prev) => [...prev, { id: ev.id, half: h, startRemaining: remainingNow }]);
+      }
     }
     setLastEvent({ playerId, key, half: h, discId });
   };
@@ -2162,6 +2283,14 @@ export default function App() {
     } else {
       setRivalScore((v) => v + 1);
       showToast(`Gol rival — ${wizard.phase}`);
+      // El gol del rival resuelve la roja más antigua que siga sirviéndose
+      // -- es justo la otra condición (además de los 2 minutos) que
+      // devuelve al equipo a jugar con los de siempre.
+      setShortHandedRestrictions((prev) => {
+        const idx = prev.findIndex((r) => r.half === half && (r.startRemaining - remaining) < 120);
+        if (idx === -1) return prev;
+        return prev.filter((_, i) => i !== idx);
+      });
     }
     setGoalWizard(null);
     saveDraftNow();
@@ -2330,6 +2459,7 @@ export default function App() {
     openStintsForCourt(startingFive, 1);
     setLastEvent(null);
     setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null);
+    setShortHandedRestrictions([]);
     setConvocados(null);
     clearMatchDraft(activeTeamId);
   };
@@ -2371,6 +2501,7 @@ export default function App() {
     openStintsForCourt(startingFive, 1);
     setLastEvent(null);
     setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null);
+    setShortHandedRestrictions([]);
     setConvocatoriaMode(null);
     setView("partido");
   };
@@ -2448,6 +2579,7 @@ export default function App() {
     setLastEvent(null); setLastGoalEvent(null); setGoalEvents([]); setConvocados(null);
     setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null);
     setChosenGoalkeeperId(null);
+    setShortHandedRestrictions([]);
     setTrainingSeconds(0);
     setLoading(true);
     setActiveTeamId(id);
@@ -2484,6 +2616,13 @@ export default function App() {
   const remaining = Math.max(0, totalHalfSeconds - seconds);
   const halfProgress = remaining / totalHalfSeconds;
   const onCourtCount = onCourt.length;
+
+  // Mientras haya una roja "sirviéndose", 1 en pista menos por cada una
+  // activa (mínimo 3, para no bloquear con GK + 2). Se resuelve sola al
+  // pasar los 2 minutos de juego o, antes, con doGoalConceded.
+  const activeShortHanded = shortHandedRestrictions.filter((r) => r.half === half && (r.startRemaining - remaining) < 120);
+  const maxOnCourt = Math.max(3, 5 - activeShortHanded.length);
+  const sentOffIds = new Set(players.filter((p) => (stats[p.id] && stats[p.id].red) > 0).map((p) => p.id));
 
   const sortedPlayers = [...players].sort((a, b) => {
     const aOn = onCourt.includes(a.id), bOn = onCourt.includes(b.id);
@@ -2668,11 +2807,18 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Users size={16} color={T.red} />
-                <span className="oswald" style={{ fontSize: 15, fontWeight: 600 }}>En pista: {onCourtCount}/5</span>
+                <span className="oswald" style={{ fontSize: 15, fontWeight: 600 }}>En pista: {onCourtCount}/{maxOnCourt}</span>
                 {convocados && <span style={{ fontSize: 11, color: T.dim }}>· Convocados: {convocados.length}</span>}
+                {sentOffIds.size > 0 && <span style={{ fontSize: 11, color: T.negative }}>· {sentOffIds.size} expulsado{sentOffIds.size === 1 ? "" : "s"}</span>}
               </div>
               <button onClick={() => setConvocatoriaMode(convocados ? "editar" : "nuevo")} style={ghostBtn}><ClipboardList size={13} /> {convocados ? "Editar convocatoria" : "Hacer convocatoria"}</button>
             </div>
+
+            {activeShortHanded.length > 0 && (
+              <div style={{ background: "rgba(139,38,53,0.18)", border: `1.5px solid ${T.negative}`, borderRadius: 12, padding: "8px 14px", marginBottom: 14, fontSize: 12, color: T.text }}>
+                🟥 Jugando con {maxOnCourt} en pista — {activeShortHanded.length > 1 ? `${activeShortHanded.length} rojas sirviéndose` : "roja sirviéndose"} (2 min de juego o hasta gol del rival)
+              </div>
+            )}
 
             {pendingAction && (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(230,57,70,0.18)", border: `1.5px solid ${T.red}`, borderRadius: 12, padding: "10px 14px", marginBottom: 14 }}>
@@ -2696,7 +2842,7 @@ export default function App() {
             )}
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 10 }}>
-              {sortedPlayers.filter((p) => !convocados || convocados.includes(p.id)).map((p) => {
+              {sortedPlayers.filter((p) => (!convocados || convocados.includes(p.id)) && !sentOffIds.has(p.id)).map((p) => {
                 const isOn = onCourt.includes(p.id);
                 // El acumulado de la parte SIGUE sumando por debajo cada
                 // segundo (statsByHalf), porque de ahí salen el resumen, el
@@ -2948,7 +3094,7 @@ export default function App() {
       )}
 
       {viewingReport && (
-        <MatchReportView html={viewingReport.html} title={viewingReport.title} onClose={() => setViewingReport(null)} />
+        <MatchReportView html={viewingReport.html} title={viewingReport.title} fileName={viewingReport.fileName} onExportError={() => showToast("No se pudo exportar el PDF — prueba con Imprimir")} onClose={() => setViewingReport(null)} />
       )}
 
       {confirmEndTraining && (
@@ -2965,7 +3111,10 @@ export default function App() {
       )}
 
       {toast && (
-        <div style={{ position: "fixed", bottom: `calc(20px + env(safe-area-inset-bottom, 0px))`, left: "50%", transform: "translateX(-50%)", background: T.surface3, border: `1px solid ${T.line}`, color: T.text, padding: "10px 16px", borderRadius: 10, fontSize: 13, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", zIndex: 100, maxWidth: "90vw", textAlign: "center" }}>
+        // Arriba, no abajo: pegado al suelo se montaba encima de la barra de
+        // Gol/Resumen/Acciones/Deshacer, justo lo que hay que volver a tocar
+        // nada más marcar algo -- muy incómodo en mitad de un partido.
+        <div style={{ position: "fixed", top: `calc(14px + env(safe-area-inset-top, 0px))`, left: "50%", transform: "translateX(-50%)", background: T.surface3, border: `1px solid ${T.line}`, color: T.text, padding: "10px 16px", borderRadius: 10, fontSize: 13, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", zIndex: 100, maxWidth: "90vw", textAlign: "center" }}>
           {toast}
         </div>
       )}
