@@ -1749,12 +1749,18 @@ export default function App() {
   // Guarda los datos de cabecera del informe (ciudad, pabellón, competición,
   // horas, observaciones, rival) en el propio partido guardado -- así, si se
   // vuelve a generar más adelante, no hay que volver a rellenarlos -- y
-  // entonces lo muestra a pantalla completa dentro de la propia app.
+  // entonces lo muestra a pantalla completa dentro de la propia app. También
+  // guarda el HTML completo ya generado (reportHtml/reportGeneratedAt) en el
+  // partido: viaja tal cual dentro del export de "Copia de seguridad" ya
+  // existente (buildBackup copia cada clave entera, sin filtrar campos), así
+  // que Segundo Cerebro puede recogerlo la próxima vez que se sincronice sin
+  // que aquí haga falta ningún export/endpoint nuevo.
   const generateReport = (patch) => {
     const updated = { ...reportMetaFor, ...patch };
     const html = buildMatchReportHtml(updated, activeTeam.name, players, activeTeam.crest);
     setViewingReport({ html, title: matchReportTitle(updated, activeTeam.name) });
-    storage.set(`matches:${activeTeamId}:${updated.date}`, JSON.stringify(updated)).catch(() => {});
+    const toSave = { ...updated, reportHtml: html, reportGeneratedAt: new Date().toISOString() };
+    storage.set(`matches:${activeTeamId}:${updated.date}`, JSON.stringify(toSave)).catch(() => {});
     loadHistoryFor(activeTeamId);
     setReportMetaFor(null);
   };
