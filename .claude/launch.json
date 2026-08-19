@@ -24,6 +24,24 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "C:\\Users\\impab\\Documents\\noia-campogramas", "run", "dev", "--", "--port", "5183"],
       "port": 5183
+    },
+    {
+      "name": "noia-porteros",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\Users\\impab\\Documents\\noia-porteros", "run", "dev", "--", "--port", "5184"],
+      "port": 5184
+    },
+    {
+      "name": "noia-porteros-build",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\Users\\impab\\Documents\\noia-porteros", "run", "preview", "--", "--port", "4174"],
+      "port": 4174
+    },
+    {
+      "name": "noia-pizarra",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\Users\\impab\\Documents\\noia-pizarra", "run", "dev", "--", "--port", "5185"],
+      "port": 5185
     }
   ]
 }
