@@ -2720,10 +2720,10 @@ export default function App() {
                 />
               </div>
 
-              <ClockDial seconds={remaining} progress={halfProgress} running={running} half={half} />
+              <ClockDial seconds={remaining} progress={halfProgress} running={running} half={half} size={96} />
 
-              <button onClick={() => { const next = !running; setClockRunning(next); if (next && !matchStartTime) setMatchStartTime(new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })); }} style={{ ...bigBtn, background: running ? T.negative : T.red, color: "#0A0A0A", fontSize: 19, fontWeight: 700, padding: "18px 30px", borderRadius: 14, gap: 10 }}>
-                {running ? <Pause size={26} /> : <Play size={26} />} {running ? "Pausar" : "Iniciar"}
+              <button onClick={() => { const next = !running; setClockRunning(next); if (next && !matchStartTime) setMatchStartTime(new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })); }} style={{ ...bigBtn, background: running ? T.negative : T.red, color: "#0A0A0A", fontSize: 24, fontWeight: 700, padding: "24px 40px", borderRadius: 16, gap: 12 }}>
+                {running ? <Pause size={32} /> : <Play size={32} />} {running ? "Pausar" : "Iniciar"}
               </button>
             </div>
             </>
@@ -4221,21 +4221,25 @@ function HomeTile({ icon: Icon, title, desc, color, onClick, disabled }) {
   );
 }
 
-function ClockDial({ seconds, progress, running, half }) {
-  const r = 30, c = 2 * Math.PI * r;
+function ClockDial({ seconds, progress, running, half, size = 68 }) {
+  const box = size / 2;
+  const r = box - 4, c = 2 * Math.PI * r;
+  const strokeWidth = size >= 90 ? 7 : 5;
+  const fontSize = Math.round(size * 0.22);
+  const labelSize = size >= 90 ? 13 : 11;
   const ringColor = !running ? T.white : seconds <= 60 ? T.amber : T.red;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-      <div style={{ position: "relative", width: 68, height: 68 }}>
-        <svg viewBox="0 0 68 68" style={{ width: 68, height: 68, transform: "rotate(-90deg)" }}>
-          <circle cx="34" cy="34" r={r} fill="none" stroke={T.surface3} strokeWidth="5" />
-          <circle cx="34" cy="34" r={r} fill="none" stroke={ringColor} strokeWidth="5" strokeDasharray={c} strokeDashoffset={c * (1 - progress)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 1s linear" }} />
+      <div style={{ position: "relative", width: size, height: size }}>
+        <svg viewBox={`0 0 ${size} ${size}`} style={{ width: size, height: size, transform: "rotate(-90deg)" }}>
+          <circle cx={box} cy={box} r={r} fill="none" stroke={T.surface3} strokeWidth={strokeWidth} />
+          <circle cx={box} cy={box} r={r} fill="none" stroke={ringColor} strokeWidth={strokeWidth} strokeDasharray={c} strokeDashoffset={c * (1 - progress)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 1s linear" }} />
         </svg>
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div className="oswald" style={{ fontSize: 15, fontWeight: 600 }}>{fmtClock(seconds)}</div>
+          <div className="oswald" style={{ fontSize, fontWeight: 600 }}>{fmtClock(seconds)}</div>
         </div>
       </div>
-      <div style={{ fontSize: 11, color: T.dim }}>
+      <div style={{ fontSize: labelSize, color: T.dim }}>
         <div>{halfLabel(half)}</div>
         <div style={{ color: running ? T.red : T.dim }}>{running ? "● en juego" : "○ parado"}</div>
       </div>
