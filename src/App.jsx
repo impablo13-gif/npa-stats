@@ -160,8 +160,8 @@ const CARD_ACTIONS = [
 // no "skip" option — grouped and color-coded so the origin is readable at a glance.
 const GOAL_PHASES = [
   { key: "ABP", label: "ABP", group: 1, color: "#8E5FD9" },
-  { key: "Ataque Posicional", label: "Ataque Posicional", group: 2, color: T.red },
-  { key: "Incorporación", label: "Incorporación", group: 2, color: T.red },
+  { key: "Ataque Posicional", label: "Ataque Posicional", group: 2, color: "#E0A030" },
+  { key: "Incorporación", label: "Incorporación", group: 2, color: "#E0A030" },
   { key: "Recuperación", label: "Recuperación", group: 3, color: "#2FBF87" },
   { key: "Transición", label: "Transición", group: 3, color: "#2FBF87" },
   { key: "5x4", label: "5x4", group: 4, color: "#3B82C4" },
@@ -548,7 +548,7 @@ function exportSingleMatchToExcel(match, teamName) {
   XLSX.writeFile(wb, `${sanitizeFileName(teamName) || "equipo"}_${dateLabel}_vs_${rivalLabel}.xlsx`);
 }
 
-const POS_GROUP_COLOR = { POR: "#E0A030", CIE: "#2E9BD6", ALA: "#27AE60", PIV: "#9B59B6" };
+const POS_GROUP_COLOR = { POR: "#E0A030", CIE: "#2E9BD6", ALA: "#16B889", PIV: "#E2574C" };
 const POS_GROUP_ICON = { POR: "🧤", CIE: "🛡", ALA: "🪽", PIV: "🎯" };
 
 // Monta el HTML del informe (mismo diseño de siempre: cabecera, minutos,
@@ -568,6 +568,17 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const esc = (v) => String(v === undefined || v === null ? "" : v)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+  // Paleta y tarjeta compartidas por todo el informe, para que se note como
+  // un mismo sistema visual y no como secciones sueltas.
+  const PAL = {
+    favor: "#1FA971", favorBg: "#EAFBF3", favorBorder: "#c8f0dd",
+    contra: "#D93B4A", contraBg: "#FDEEF0", contraBorder: "#f6d0d5",
+    blue: "#2E9BD6", blueBg: "#EAF4FC",
+    orange: "#E0A030", orangeBg: "#FBF1E1",
+    amber: "#E3B23C",
+  };
+  const CARD = "border:1px solid #e6e8eb; border-radius:12px; padding:12px; background:#fff; box-shadow:0 1px 3px rgba(15,23,32,0.05);";
+
   const avatarImg = (row, size = 32) => {
     const rp = resolveRosterPlayer(row, rosterPlayers);
     const photo = rp && rp.photo;
@@ -576,8 +587,8 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   };
 
   const sectionTitle = (icon, text) => `
-    <div style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:800; color:#C0202E; text-transform:uppercase; letter-spacing:0.4px; margin:22px 0 8px; padding-bottom:6px; border-bottom:1px solid #e2e2e2;">
-      <span>${icon}</span><span>${esc(text)}</span>
+    <div style="display:flex; align-items:center; gap:7px; font-size:13.5px; font-weight:800; color:#C0202E; text-transform:uppercase; letter-spacing:0.5px; margin:26px 0 10px; padding-bottom:7px; border-bottom:2px solid #f0f1f3;">
+      <span style="font-size:15px;">${icon}</span><span>${esc(text)}</span>
     </div>`;
 
   // Convocados de este partido si se guardaron — si no (partidos de antes de
@@ -599,31 +610,40 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
     const g = rotFor(row);
     const halvesHtml = presentHalves.map((half) => {
       const h = g && g.halves.get(half);
-      if (!h) return `<div style="min-width:64px; color:#ccc; font-size:10px;">—</div>`;
-      const chips = h.list.map((r) => `<span>${fmtClock(r.startRemaining)}→${fmtClock(r.endRemaining)} <b style="color:#333;">${fmtMin(r.durationSeconds)}</b></span>`).join(" · ");
-      return `<div style="min-width:100px;">
-          <div style="font-size:7px; color:#999; text-transform:uppercase;">${esc(halfLabel(half))}</div>
-          <div style="display:inline-block; background:#1a1a1a; color:#fff; font-size:10px; font-weight:700; border-radius:5px; padding:2px 7px; margin-bottom:2px;">${fmtMin(h.total)}</div>
-          <div style="line-height:1.5; font-size:8px; color:#666;">${chips}</div>
+      if (!h) return `<div style="min-width:70px; color:#d0d3d7; font-size:11px;">—</div>`;
+      const chips = h.list.map((r) => `${fmtClock(r.startRemaining)}→${fmtClock(r.endRemaining)} <b style="color:#333;">${fmtMin(r.durationSeconds)}</b>`).join(" · ");
+      return `<div style="min-width:110px;">
+          <div style="font-size:7.5px; color:#9aa0a6; text-transform:uppercase; font-weight:700; margin-bottom:2px;">${esc(halfLabel(half))}</div>
+          <div style="display:inline-block; background:#15181c; color:#fff; font-size:11px; font-weight:800; border-radius:6px; padding:3px 9px; margin-bottom:3px;">${fmtMin(h.total)}</div>
+          <div style="line-height:1.5; font-size:8px; color:#8a9099;">${chips}</div>
         </div>`;
     }).join("");
-    return `<div style="display:flex; align-items:center; gap:10px; padding:7px 6px; border-bottom:1px solid #eee; break-inside:avoid;">
-        ${avatarImg(row, 28)}
-        <div style="min-width:96px;">
-          <div style="font-size:11px; font-weight:700;">${esc(row.name)}</div>
-          <div style="font-size:9px; color:#999;">#${esc(row.number)}</div>
+    return `<div style="display:flex; align-items:center; gap:12px; padding:9px 12px; border-bottom:1px solid #f0f1f3; break-inside:avoid;">
+        ${avatarImg(row, 34)}
+        <div style="min-width:100px;">
+          <div style="font-size:12px; font-weight:700;">${esc(row.name)}</div>
+          <div style="font-size:9px; color:#9aa0a6;">#${esc(row.number)}</div>
         </div>
-        <div style="display:flex; gap:14px; flex:1; flex-wrap:wrap;">${halvesHtml}</div>
-        <div style="font-size:13px; font-weight:800; min-width:46px; text-align:right;">${fmtMin(row.seconds)}</div>
+        <div style="display:flex; gap:16px; flex:1; flex-wrap:wrap;">${halvesHtml}</div>
+        <div style="font-size:14px; font-weight:800; min-width:50px; text-align:right;">${fmtMin(row.seconds)}</div>
       </div>`;
   };
 
   const byPosition = (rowRenderer) => POSITIONS.map((pos) => {
     const rows = squadRows.filter((p) => (p.position || "ALA") === pos);
     if (!rows.length) return "";
-    return `<div style="margin-bottom:10px; break-inside:avoid;">
-        <div style="background:${POS_GROUP_COLOR[pos]}; color:#fff; font-size:10px; font-weight:800; letter-spacing:0.6px; text-transform:uppercase; padding:5px 10px; border-radius:6px 6px 0 0;">${POS_GROUP_ICON[pos]} ${esc(POS_LABEL[pos])}S</div>
-        <div style="border:1px solid #eee; border-top:none; border-radius:0 0 6px 6px;">${rows.map(rowRenderer).join("")}</div>
+    return `<div style="margin-bottom:14px; border-radius:12px; overflow:hidden; border:1px solid #e6e8eb; box-shadow:0 1px 3px rgba(15,23,32,0.05); break-inside:avoid;">
+        <div style="background:${POS_GROUP_COLOR[pos]}; color:#fff; font-size:11.5px; font-weight:800; letter-spacing:1px; text-transform:uppercase; padding:9px 14px;">${POS_GROUP_ICON[pos]} ${esc(POS_LABEL[pos])}S</div>
+        <div style="background:#fff;">${rows.map(rowRenderer).join("")}</div>
+      </div>`;
+  }).join("");
+
+  const byPositionGrid = (rowRenderer) => POSITIONS.map((pos) => {
+    const rows = squadRows.filter((p) => (p.position || "ALA") === pos);
+    if (!rows.length) return "";
+    return `<div style="margin-bottom:16px;">
+        <div style="background:${POS_GROUP_COLOR[pos]}; color:#fff; font-size:11.5px; font-weight:800; letter-spacing:1px; text-transform:uppercase; padding:9px 14px; border-radius:10px; margin-bottom:10px;">${POS_GROUP_ICON[pos]} ${esc(POS_LABEL[pos])}S</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">${rows.map(rowRenderer).join("")}</div>
       </div>`;
   }).join("");
 
@@ -635,14 +655,14 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const maxRankSeconds = Math.max(1, ...minutesRanking.map((p) => p.seconds || 0));
   const rankMedal = (i) => (i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}`);
   const minutesRankingHtml = !minutesRanking.length ? "" : `${sectionTitle("🏅", "Top 5 · Minutos en pista")}
-    <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">
+    <div style="${CARD}">
       ${minutesRanking.map((p, i) => `
-        <div style="display:flex; align-items:center; gap:9px; padding:6px 0; ${i < minutesRanking.length - 1 ? "border-bottom:1px solid #f2f2f2;" : ""}">
-          <span style="width:22px; text-align:center; font-size:${i < 3 ? 15 : 11}px; font-weight:800; color:#999;">${rankMedal(i)}</span>
-          ${avatarImg(p, 28)}
-          <span style="width:100px; font-size:11px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(p.name)}</span>
-          <div style="flex:1; background:#f2f2f2; border-radius:6px; height:14px; overflow:hidden;"><div style="width:${((p.seconds || 0) / maxRankSeconds) * 100}%; height:100%; background:linear-gradient(90deg,#E63946,#7A1620);"></div></div>
-          <span style="width:48px; text-align:right; font-size:12px; font-weight:800;">${fmtMin(p.seconds)}</span>
+        <div style="display:flex; align-items:center; gap:10px; padding:7px 0; ${i < minutesRanking.length - 1 ? "border-bottom:1px solid #f2f3f5;" : ""}">
+          <span style="width:24px; text-align:center; font-size:${i < 3 ? 16 : 12}px; font-weight:800; color:#9aa0a6;">${rankMedal(i)}</span>
+          ${avatarImg(p, 32)}
+          <span style="width:110px; font-size:12px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(p.name)}</span>
+          <div style="flex:1; background:#f0f1f3; border-radius:7px; height:16px; overflow:hidden;"><div style="width:${((p.seconds || 0) / maxRankSeconds) * 100}%; height:100%; background:linear-gradient(90deg,#E63946,#7A1620);"></div></div>
+          <span style="width:52px; text-align:right; font-size:13px; font-weight:800;">${fmtMin(p.seconds)}</span>
         </div>`).join("")}
     </div>`;
 
@@ -651,23 +671,29 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
     const phaseDef = GOAL_PHASES.find((p) => p.key === ev.phase);
     const phaseColor = phaseDef ? phaseDef.color : "#888";
     const onCourt = ev.onCourt || [];
-    return `<div style="border:1px solid ${ev.type === "for" ? "#cdeee0" : "#f6d3d6"}; background:${ev.type === "for" ? "#f4fbf8" : "#fdf3f4"}; border-radius:9px; padding:8px 10px; margin-bottom:8px; break-inside:avoid;">
-        <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
-          <span style="background:#1a1a1a; color:#fff; font-size:10px; font-weight:700; border-radius:5px; padding:2px 7px;">${fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}</span>
-          <span style="background:${phaseColor}; color:#fff; font-size:8px; font-weight:700; border-radius:5px; padding:2px 6px; text-transform:uppercase;">${esc(ev.phase)}</span>
+    const isFor = ev.type === "for";
+    return `<div style="border:1px solid ${isFor ? PAL.favorBorder : PAL.contraBorder}; background:${isFor ? PAL.favorBg : PAL.contraBg}; border-radius:10px; padding:10px 12px; margin-bottom:8px; break-inside:avoid;">
+        <div style="display:flex; align-items:center; gap:7px; margin-bottom:8px;">
+          <span style="background:#15181c; color:#fff; font-size:11px; font-weight:800; border-radius:6px; padding:3px 8px;">${fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}</span>
+          ${phaseDef ? `<span style="background:${phaseColor}; color:#fff; font-size:8px; font-weight:800; border-radius:5px; padding:3px 7px; text-transform:uppercase; letter-spacing:0.3px;">${esc(phaseDef.label)}</span>` : ""}
         </div>
-        <div style="display:flex; gap:6px; align-items:flex-start; flex-wrap:wrap;">
+        <div style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap;">
           ${onCourt.map((p) => {
-            const isScorer = ev.type === "for" && (p.id === ev.authorId || p.name === ev.authorName);
-            return `<div style="text-align:center; width:40px;">
-                <div style="${isScorer ? "border:2px solid #C0202E; border-radius:50%; display:inline-block;" : ""}">${avatarImg(p, isScorer ? 26 : 30)}</div>
-                <div style="font-size:7px; color:${isScorer ? "#C0202E" : "#666"}; font-weight:${isScorer ? 700 : 400}; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc((p.name || "").split(" ")[0])}</div>
+            const isScorer = isFor && (p.id === ev.authorId || p.name === ev.authorName);
+            const isAssist = isFor && ev.assistName && p.name === ev.assistName;
+            const rosterRow = squadRows.find((sr) => sr.id === p.id || `${sr.name}|${sr.number}` === `${p.name}|${p.number}`);
+            const badge = isScorer ? `<span style="position:absolute; bottom:-2px; right:-2px; background:${PAL.favor}; color:#fff; border-radius:50%; width:14px; height:14px; font-size:8px; display:flex; align-items:center; justify-content:center; border:1.5px solid #fff;">⚽</span>`
+              : isAssist ? `<span style="position:absolute; bottom:-2px; right:-2px; background:${PAL.blue}; color:#fff; border-radius:50%; width:13px; height:13px; font-size:7px; font-weight:800; display:flex; align-items:center; justify-content:center; border:1.5px solid #fff;">A</span>`
+              : (rosterRow && rosterRow.isGK) ? `<span style="position:absolute; bottom:-2px; right:-2px; background:${PAL.blue}; color:#fff; border-radius:50%; width:13px; height:13px; font-size:7px; display:flex; align-items:center; justify-content:center; border:1.5px solid #fff;">🧤</span>` : "";
+            return `<div style="text-align:center; width:38px;">
+                <div style="position:relative; display:inline-block;">${avatarImg(p, 30)}${badge}</div>
+                <div style="font-size:7px; color:${isScorer ? PAL.favor : "#555"}; font-weight:${isScorer ? 700 : 500}; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc((p.name || "").split(" ")[0])}</div>
               </div>`;
           }).join("")}
         </div>
-        <div style="font-size:10px; margin-top:5px; font-weight:700; color:${ev.type === "for" ? "#1a8f5e" : "#C0202E"};">
-          ⚽ ${ev.type === "for" ? esc(ev.authorName || "") : "Gol del rival"}
-          ${ev.type === "for" && ev.assistName ? `<span style="font-weight:600; color:#2E9BD6;"> · 🅰 ${esc(ev.assistName)}</span>` : ""}
+        <div style="font-size:10px; margin-top:7px; font-weight:700; color:${isFor ? PAL.favor : PAL.contra};">
+          ⚽ ${isFor ? esc(ev.authorName || "") : "Gol del rival"}
+          ${isFor && ev.assistName ? `<span style="font-weight:600; color:${PAL.blue};"> · 🅰 ${esc(ev.assistName)}</span>` : ""}
         </div>
       </div>`;
   };
@@ -676,7 +702,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const goalsByHalfHtml = presentHalves.filter((h) => goals.some((g) => g.half === h)).map((h) => {
     const sc = halfScore(match, h);
     return `<div>
-        <div style="font-size:10px; font-weight:800; color:#888; text-transform:uppercase; margin-bottom:6px;">${esc(halfLabel(h))} <span style="color:#111;">${sc.favor}-${sc.contra}</span></div>
+        <div style="text-align:center; font-size:10px; font-weight:800; color:#6b7280; text-transform:uppercase; letter-spacing:1px; padding-bottom:8px; margin-bottom:10px; border-bottom:2px solid #eef0f2;">${esc(halfLabel(h))} <span style="color:#15181c;">· ${sc.favor}-${sc.contra}</span></div>
         ${goals.filter((g) => g.half === h).map(goalCard).join("")}
       </div>`;
   }).join("");
@@ -700,110 +726,185 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
     const dotsHtml = points.map((pt, i) => {
       const x = minToX(pt.minute);
       const above = i % 2 === 0;
-      const color = pt.ev.type === "for" ? ((GOAL_PHASES.find((p) => p.key === pt.ev.phase) || {}).color || "#C0202E") : "#C0202E";
+      const isFor = pt.ev.type === "for";
+      const color = isFor ? PAL.favor : PAL.contra;
       const labelY = above ? 20 : H - 32;
       const timeY = above ? 32 : H - 44;
       const lineY1 = above ? 26 : H - 26;
       return `
-        <line x1="${x}" y1="${lineY1}" x2="${x}" y2="${H / 2}" stroke="#ddd" stroke-width="1" />
+        <line x1="${x}" y1="${lineY1}" x2="${x}" y2="${H / 2}" stroke="#e0e2e5" stroke-width="1" />
         <circle cx="${x}" cy="${H / 2}" r="5" fill="${color}" />
-        <text x="${x}" y="${labelY}" text-anchor="middle" font-size="8" font-weight="700" fill="#222">${esc(pt.ev.type === "for" ? (pt.ev.authorName || "") : "En contra")}</text>
-        <text x="${x}" y="${timeY}" text-anchor="middle" font-size="7" fill="#888">${fmtMin(Math.round(pt.minute * 60))}</text>`;
+        <text x="${x}" y="${labelY}" text-anchor="middle" font-size="8" font-weight="700" fill="${isFor ? "#15181c" : PAL.contra}">${esc(isFor ? (pt.ev.authorName || "") : "En contra")}</text>
+        <text x="${x}" y="${timeY}" text-anchor="middle" font-size="7" fill="#9aa0a6">${fmtMin(Math.round(pt.minute * 60))}</text>`;
     }).join("");
     const breaksHtml = presentHalves.slice(1).map((h) => {
       const x = minToX(startOfHalfMin(h));
-      return `<circle cx="${x}" cy="${H / 2}" r="3" fill="#999" />
-        <text x="${x}" y="${H / 2 + 18}" text-anchor="middle" font-size="8" fill="#999">${esc(h > 2 ? "Prórroga" : "Descanso")}</text>`;
+      return `<circle cx="${x}" cy="${H / 2}" r="3" fill="#b7bcc2" />
+        <text x="${x}" y="${H / 2 + 18}" text-anchor="middle" font-size="8" fill="#9aa0a6">${esc(h > 2 ? "Prórroga" : "Descanso")}</text>`;
     }).join("");
     return `${sectionTitle("⏱", "Cronología")}
       <svg viewBox="0 0 ${W} ${H}" style="width:100%; height:auto; display:block;">
         <line x1="${pad}" y1="${H / 2}" x2="${W - pad}" y2="${H / 2}" stroke="#ccc" stroke-width="1.5" />
         ${breaksHtml}
-        <text x="${pad}" y="${H - 6}" font-size="8" fill="#999">0'</text>
-        <text x="${W - pad}" y="${H - 6}" text-anchor="end" font-size="8" fill="#999">${totalMin}'</text>
+        <text x="${pad}" y="${H - 6}" font-size="8" fill="#9aa0a6">0'</text>
+        <text x="${W - pad}" y="${H - 6}" text-anchor="end" font-size="8" fill="#9aa0a6">${totalMin}'</text>
         ${dotsHtml}
       </svg>`;
   })();
 
-  /* ---- Pérdidas, faltas y tarjetas -- cada cosa en su propio dashboard ---- */
-  const discByPlayer = new Map();
-  (match.disciplineEvents || []).forEach((ev) => {
-    const key = ev.playerId || `${ev.playerName}|${ev.playerNumber}`;
-    if (!discByPlayer.has(key)) discByPlayer.set(key, { id: ev.playerId, name: ev.playerName, number: ev.playerNumber, fouls: 0, foulsReceived: 0, yellowHalves: [], redHalves: [] });
-    const d = discByPlayer.get(key);
-    if (ev.type === "fouls") d.fouls++;
-    else if (ev.type === "foulsReceived") d.foulsReceived++;
-    else if (ev.type === "yellow") d.yellowHalves.push(ev.half);
-    else if (ev.type === "red") d.redHalves.push(ev.half);
+  /* ---- Presencia en pista: goles con cada uno dentro, y con quién más minutos junto ---- */
+  const onCourtGoalStats = new Map();
+  goals.forEach((ev) => {
+    (ev.onCourt || []).forEach((p) => {
+      const key = p.id || `${p.name}|${p.number}`;
+      if (!onCourtGoalStats.has(key)) onCourtGoalStats.set(key, { ...p, favor: 0, contra: 0 });
+      const d = onCourtGoalStats.get(key);
+      if (ev.type === "for") d.favor++; else d.contra++;
+    });
   });
-
-  const totalRecoveries = squadRows.reduce((s, p) => s + (p.recoveries || 0), 0);
-  const totalTurnovers = squadRows.reduce((s, p) => s + (p.turnovers || 0), 0);
-
-  // Ranking con barra, foto y valor -- el mismo lenguaje visual que ya usa
-  // "Presencia en pista" y el nuevo ranking de minutos, para las faltas
-  // cometidas y las recibidas por separado.
-  const foulBarCard = (title, color, rows, valueKey) => {
-    const max = Math.max(1, ...rows.map((p) => p[valueKey] || 0));
-    const body = !rows.length ? `<div style="font-size:10px; color:#aaa;">Sin registros.</div>` : rows.map((p) => `
-        <div style="display:flex; align-items:center; gap:8px; padding:4px 0;">
-          ${avatarImg(p, 22)}
-          <span style="width:78px; font-size:10px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(p.name)}</span>
-          <div style="flex:1; background:#f2f2f2; border-radius:5px; height:10px; overflow:hidden;"><div style="width:${((p[valueKey] || 0) / max) * 100}%; height:100%; background:${color};"></div></div>
-          <span style="width:16px; text-align:right; font-size:11px; font-weight:800;">${p[valueKey] || 0}</span>
-        </div>`).join("");
-    return `<div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">
-        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; margin-bottom:8px;">${esc(title)}</div>
-        ${body}
-      </div>`;
-  };
-  const foulsCommittedRows = squadRows.filter((p) => (p.fouls || 0) > 0).sort((a, b) => (b.fouls || 0) - (a.fouls || 0));
-  const foulsReceivedRows = squadRows.filter((p) => (p.foulsReceived || 0) > 0).sort((a, b) => (b.foulsReceived || 0) - (a.foulsReceived || 0));
-
-  const cardedPlayers = [...discByPlayer.values()].filter((d) => d.yellowHalves.length || d.redHalves.length);
-  const cardsHtml = !cardedPlayers.length ? `<div style="font-size:10px; color:#aaa;">Sin tarjetas.</div>` : cardedPlayers.map((d) => `
-      <div style="display:flex; align-items:center; gap:8px; padding:4px 0;">
-        ${avatarImg(d, 22)}
-        <span style="flex:1; font-size:10px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(d.name)}</span>
-        ${d.yellowHalves.map((h) => `<span style="background:#E3B23C; color:#fff; border-radius:3px; padding:1px 5px; font-weight:700; font-size:8px;">${halfShortLabel(h)}</span>`).join("")}
-        ${d.redHalves.map((h) => `<span style="background:#8B2635; color:#fff; border-radius:3px; padding:1px 5px; font-weight:700; font-size:8px;">${halfShortLabel(h)}</span>`).join("")}
-      </div>`).join("");
-
-  const disciplineHtml = `${sectionTitle("⚠", "Pérdidas, faltas y tarjetas")}
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
-      <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">
-        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; margin-bottom:10px;">Pérdidas y recuperaciones</div>
-        <div style="display:flex; justify-content:space-around; text-align:center;">
-          <div><div style="font-size:22px; font-weight:800; color:#1a8f5e;">${totalRecoveries}</div><div style="font-size:8px; color:#999; text-transform:uppercase;">Recuperaciones</div></div>
-          <div><div style="font-size:22px; font-weight:800; color:#C0202E;">${totalTurnovers}</div><div style="font-size:8px; color:#999; text-transform:uppercase;">Pérdidas</div></div>
+  const presenceRows = [...onCourtGoalStats.values()].sort((a, b) => (b.favor + b.contra) - (a.favor + a.contra));
+  const maxPresenceSide = Math.max(1, ...presenceRows.map((r) => Math.max(r.favor, r.contra)));
+  // Barra divergente desde el centro -- roja hacia la izquierda (en contra),
+  // verde hacia la derecha (a favor), como un saldo visual de un vistazo.
+  const presenceHtml = !presenceRows.length ? `<div style="font-size:10px; color:#aaa;">Sin goles registrados.</div>` : presenceRows.map((r) => {
+    const net = r.favor - r.contra;
+    const leftPct = (r.contra / maxPresenceSide) * 100;
+    const rightPct = (r.favor / maxPresenceSide) * 100;
+    return `<div style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:10px;">
+        ${avatarImg(r, 22)}
+        <span style="width:66px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600;">${esc((r.name || "").split(" ")[0])}</span>
+        <span style="width:24px; text-align:right; font-size:10px; font-weight:800; color:${net >= 0 ? PAL.favor : PAL.contra};">${net > 0 ? `+${net}` : net}</span>
+        <div style="flex:1; display:flex; align-items:center; height:13px;">
+          <div style="flex:1; display:flex; justify-content:flex-end;"><div style="width:${leftPct}%; background:${PAL.contra}; height:100%; border-radius:3px 0 0 3px; display:flex; align-items:center; justify-content:flex-start; padding-left:3px;">${r.contra ? `<span style="font-size:8px; color:#fff; font-weight:700;">${r.contra}</span>` : ""}</div></div>
+          <div style="width:1px; height:100%; background:#d8dce0;"></div>
+          <div style="flex:1; display:flex; justify-content:flex-start;"><div style="width:${rightPct}%; background:${PAL.favor}; height:100%; border-radius:0 3px 3px 0; display:flex; align-items:center; justify-content:flex-end; padding-right:3px;">${r.favor ? `<span style="font-size:8px; color:#fff; font-weight:700;">${r.favor}</span>` : ""}</div></div>
         </div>
+      </div>`;
+  }).join("");
+
+  // Foto y nombre de cada combinación, con el mismo lenguaje visual que ya
+  // usa el quinteto en pista de cada gol.
+  const rowOf = (id) => {
+    const g = rotGroups.find((x) => x.playerId === id);
+    return g ? { id, name: g.name, number: g.number } : { id, name: "?", number: "?" };
+  };
+  const comboRow = (combo, seconds) => `<div style="display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid #f7f7f7;">
+        <div style="display:flex; gap:4px; flex:1; flex-wrap:wrap;">
+          ${combo.map((id) => {
+            const row = rowOf(id);
+            return `<div style="text-align:center; width:34px;">
+                ${avatarImg(row, 26)}
+                <div style="font-size:7px; color:#666; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc((row.name || "").split(" ")[0])}</div>
+              </div>`;
+          }).join("")}
+        </div>
+        <span style="font-weight:700; color:${PAL.blue}; flex-shrink:0; font-size:11px;">${fmtMin(seconds)}</span>
+      </div>`;
+  // Los porteros no cuentan para "más minutos juntos" -- casi siempre están
+  // los 40 minutos en pista sin que eso diga nada táctico, y dominarían
+  // todas las combinaciones.
+  const gkIds = new Set(squadRows.filter((p) => p.isGK).map((p) => p.id));
+  const outfieldRotations = (match.rotations || []).filter((r) => !gkIds.has(r.playerId));
+  const pairs = topCombosTogether(outfieldRotations, 2, 4);
+  const trios = topCombosTogether(outfieldRotations, 3, 4);
+  const quartets = topCombosTogether(outfieldRotations, 4, 4);
+  const pairingHtml = (!pairs.length && !trios.length && !quartets.length) ? `<div style="font-size:10px; color:#aaa;">No hay suficientes rotaciones para calcularlo.</div>` : `
+      ${pairs.length ? `<div style="font-size:9px; font-weight:700; color:#999; text-transform:uppercase; margin:6px 0 2px;">Parejas</div>${pairs.map((r) => comboRow(r.combo, r.seconds)).join("")}` : ""}
+      ${trios.length ? `<div style="font-size:9px; font-weight:700; color:#999; text-transform:uppercase; margin:6px 0 2px;">Tríos</div>${trios.map((r) => comboRow(r.combo, r.seconds)).join("")}` : ""}
+      ${quartets.length ? `<div style="font-size:9px; font-weight:700; color:#999; text-transform:uppercase; margin:6px 0 2px;">Cuartetos</div>${quartets.map((r) => comboRow(r.combo, r.seconds)).join("")}` : ""}`;
+
+  const presenceSectionHtml = (!presenceRows.length && !pairs.length && !trios.length && !quartets.length) ? "" : `${sectionTitle("👥", "Presencia en pista")}
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+      <div style="${CARD}">
+        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; margin-bottom:8px;">Goles en pista <span style="color:${PAL.contra};">en contra</span> · <span style="color:${PAL.favor};">a favor</span></div>
+        ${presenceHtml}
       </div>
-      <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">
-        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; margin-bottom:8px;">Tarjetas</div>
-        ${cardsHtml}
+      <div style="${CARD}">
+        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase;">Más minutos juntos</div>
+        ${pairingHtml}
       </div>
-    </div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px;">
-      ${foulBarCard("Faltas cometidas", "#C0202E", foulsCommittedRows, "fouls")}
-      ${foulBarCard("Faltas recibidas", "#1a8f5e", foulsReceivedRows, "foulsReceived")}
     </div>`;
 
-  /* ---- Tiros: por jugador y proporción a puerta/fuera/gol ---- */
+  /* ---- Campogramas: dónde pasó cada tiro, pérdida y recuperación. Estático
+     a propósito (sin desplegable ni JavaScript): un jugador con varias
+     acciones en la misma zona sale una vez, como texto, sobre el dibujo de
+     la pista -- así se ve todo de un vistazo y no complica rasterizar la
+     página para el PDF. ---- */
+  const zoneLinesFor = (events, color) => {
+    const byZone = new Map();
+    events.forEach((ev) => {
+      if (!byZone.has(ev.zone)) byZone.set(ev.zone, new Map());
+      const byPlayer = byZone.get(ev.zone);
+      const key = ev.playerId || ev.playerName;
+      const cur = byPlayer.get(key) || { name: ev.playerName, count: 0 };
+      cur.count++;
+      byPlayer.set(key, cur);
+    });
+    return PITCH_ZONES.map((z) => {
+      const byPlayer = byZone.get(z.key);
+      if (!byPlayer) return [];
+      return [...byPlayer.values()].map((v) => `<div style="font-size:6.5px; font-weight:700; color:${color}; line-height:1.3;">${esc((v.name || "").split(" ")[0])} ×${v.count}</div>`);
+    });
+  };
+  const zoneCell = (linesHtml) => `<div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; text-align:center; overflow:hidden; padding:1px;">${linesHtml.join("")}</div>`;
+  const courtLinesSvg = () => `
+    <svg viewBox="0 0 100 120" preserveAspectRatio="none" style="position:absolute; inset:0; width:100%; height:100%;">
+      <line x1="0" y1="60" x2="100" y2="60" stroke="#B8D9F0" stroke-width="0.7" />
+      <circle cx="50" cy="60" r="11" fill="none" stroke="#B8D9F0" stroke-width="0.7" />
+      <rect x="28" y="0" width="44" height="7" fill="none" stroke="#B8D9F0" stroke-width="0.7" />
+      <rect x="28" y="113" width="44" height="7" fill="none" stroke="#B8D9F0" stroke-width="0.7" />
+      <line x1="0" y1="40" x2="100" y2="40" stroke="#D6E9F7" stroke-width="0.5" stroke-dasharray="1.6 1.6" />
+      <line x1="0" y1="80" x2="100" y2="80" stroke="#D6E9F7" stroke-width="0.5" stroke-dasharray="1.6 1.6" />
+      <line x1="33.33" y1="0" x2="33.33" y2="120" stroke="#D6E9F7" stroke-width="0.5" stroke-dasharray="1.6 1.6" />
+      <line x1="66.66" y1="0" x2="66.66" y2="120" stroke="#D6E9F7" stroke-width="0.5" stroke-dasharray="1.6 1.6" />
+    </svg>`;
+  const courtFrame = (cellsHtml) => `
+    <div style="position:relative; border:1.5px solid #BFDDF3; border-radius:12px; overflow:hidden; background:repeating-linear-gradient(90deg,#EFF6FC 0,#EFF6FC 12.5%,#F8FBFE 12.5%,#F8FBFE 25%); aspect-ratio:1/1.2; max-width:230px; margin:0 auto;">
+      ${courtLinesSvg()}
+      ${teamCrest ? `<img src="${teamCrest}" style="position:absolute; top:50%; left:50%; width:24%; transform:translate(-50%,-50%); opacity:0.15;" />` : ""}
+      <div style="position:absolute; left:2px; top:8px; bottom:8px; display:flex; align-items:center; z-index:2; pointer-events:none;">
+        <span style="writing-mode:vertical-rl; font-size:6.5px; font-weight:800; letter-spacing:1.4px; color:#5B9BCB; white-space:nowrap;">▲ ATAQUE</span>
+      </div>
+      <div style="position:relative; z-index:1; display:grid; grid-template-columns:1fr 1fr 1fr; grid-auto-rows:1fr; height:100%; padding:3px 3px 3px 15px; box-sizing:border-box;">
+        ${cellsHtml}
+      </div>
+    </div>`;
+  const pitchCard = (label, color, bg, events) => {
+    const cellsHtml = zoneLinesFor(events, color).map(zoneCell).join("");
+    return `<div>
+        <div style="display:flex; align-items:center; justify-content:center; gap:6px; margin-bottom:8px;">
+          <span style="font-size:10px; font-weight:800; color:${color}; text-transform:uppercase; letter-spacing:0.4px;">${esc(label)}</span>
+          <span style="background:${bg}; color:${color}; font-size:9px; font-weight:800; border-radius:9px; padding:1px 7px;">${events.length}</span>
+        </div>
+        ${courtFrame(cellsHtml)}
+      </div>`;
+  };
+
+  const turnoverEvents = (match.zonedEvents || []).filter((ev) => ev.key === "turnovers");
+  const recoveryEvents = (match.zonedEvents || []).filter((ev) => ev.key === "recoveries");
+  const shotOnEvents = (match.zonedEvents || []).filter((ev) => ev.key === "shotsOn");
+  const shotOffEvents = (match.zonedEvents || []).filter((ev) => ev.key === "shotsOff");
+  // La zona de finalización de los propios goles (si se marcó al anotarlos)
+  // se pinta como un campograma más, junto a los otros dos tipos de tiro.
+  const goalZoneEvents = (match.goalEvents || []).filter((ev) => ev.type === "for" && ev.zone).map((ev) => {
+    const onCourtRow = (ev.onCourt || []).find((p) => p.id === ev.authorId);
+    return { zone: ev.zone, playerId: ev.authorId, playerName: ev.authorName, playerNumber: onCourtRow ? onCourtRow.number : "?", half: ev.half, remaining: ev.remaining };
+  });
+
+  /* ---- Tiros: por jugador, proporción a puerta/fuera/gol, campogramas ---- */
   const shooters = squadRows.filter((p) => (p.shotsOn || 0) + (p.shotsOff || 0) + (p.goals || 0) > 0)
     .sort((a, b) => ((b.shotsOn || 0) + (b.shotsOff || 0) + (b.goals || 0)) - ((a.shotsOn || 0) + (a.shotsOff || 0) + (a.goals || 0)));
-  const maxShots = Math.max(1, ...shooters.map((p) => (p.shotsOn || 0) + (p.shotsOff || 0) + (p.goals || 0)));
 
   const shotsByPlayerHtml = shooters.map((p) => {
     const total = (p.shotsOn || 0) + (p.shotsOff || 0) + (p.goals || 0);
-    const dots = [];
-    for (let i = 0; i < (p.goals || 0); i++) dots.push(`<div style="width:8px;height:8px;border-radius:50%;background:#1a8f5e;"></div>`);
-    for (let i = 0; i < (p.shotsOn || 0); i++) dots.push(`<div style="width:8px;height:8px;border-radius:50%;background:#2E9BD6;"></div>`);
-    for (let i = 0; i < (p.shotsOff || 0); i++) dots.push(`<div style="width:8px;height:8px;border-radius:50%;border:1.5px solid #E0A030;"></div>`);
-    return `<div style="text-align:center; width:48px; flex-shrink:0;">
-        <div style="font-size:10px; font-weight:800; margin-bottom:3px;">${total}</div>
-        <div style="display:flex; flex-direction:column-reverse; gap:2px; align-items:center; min-height:${maxShots * 10}px;">${dots.join("")}</div>
-        <div style="margin-top:4px;">${avatarImg(p, 26)}</div>
-        <div style="font-size:7px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc((p.name || "").split(" ")[0])}</div>
+    const badge = (label, val, color) => val ? `<span style="color:${color}; font-weight:700; margin-right:6px;">${label}×${val}</span>` : "";
+    return `<div style="display:flex; align-items:center; gap:8px; padding:5px 0; break-inside:avoid;">
+        ${avatarImg(p, 26)}
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:11px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(p.name)}</div>
+          <div style="font-size:8.5px;">${badge("P", p.shotsOn, PAL.blue)}${badge("F", p.shotsOff, PAL.orange)}${badge("G", p.goals, PAL.favor)}</div>
+        </div>
+        <span style="font-size:15px; font-weight:800;">${total}</span>
       </div>`;
   }).join("");
 
@@ -822,228 +923,244 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
       offset += dash;
       return el;
     };
-    return `<svg viewBox="0 0 110 110" style="width:120px; height:120px; display:block; margin:0 auto;">${seg(totShotsOn, "#2E9BD6")}${seg(totShotsOff, "#E0A030")}${seg(totGoals, "#1a8f5e")}</svg>
-      <div style="display:flex; flex-direction:column; gap:3px; font-size:8px; margin-top:8px;">
-        <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#2E9BD6;"></span> A puerta: ${totShotsOn}</span>
-        <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#E0A030;"></span> Fuera: ${totShotsOff}</span>
-        <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#1a8f5e;"></span> Gol: ${totGoals}</span>
+    return `<svg viewBox="0 0 110 110" style="width:120px; height:120px; display:block; margin:0 auto;">${seg(totShotsOn, PAL.blue)}${seg(totShotsOff, PAL.orange)}${seg(totGoals, PAL.favor)}</svg>
+      <div style="display:flex; flex-direction:column; gap:4px; font-size:9px; margin-top:10px;">
+        <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${PAL.blue};"></span> A puerta: <b>${totShotsOn}</b> (${Math.round((totShotsOn / totShots) * 100)}%)</span>
+        <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${PAL.orange};"></span> Fuera: <b>${totShotsOff}</b> (${Math.round((totShotsOff / totShots) * 100)}%)</span>
+        <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${PAL.favor};"></span> Gol: <b>${totGoals}</b> (${Math.round((totGoals / totShots) * 100)}%)</span>
+      </div>`;
+  })();
+
+  const incidenceHtml = (() => {
+    const allShots = [...shotOnEvents, ...shotOffEvents, ...goalZoneEvents];
+    if (!allShots.length) return "";
+    const rowCounts = [0, 0, 0];
+    allShots.forEach((ev) => { const z = PITCH_ZONES.find((zz) => zz.key === ev.zone); if (z) rowCounts[z.row]++; });
+    const total = allShots.length;
+    const cellsHtml = [0, 1, 2].map((r) => {
+      const pct = Math.round((rowCounts[r] / total) * 100);
+      const alpha = (0.15 + (pct / 100) * 0.65).toFixed(2);
+      return `<div style="grid-column:1 / 4; display:flex; align-items:center; justify-content:center; background:rgba(217,59,74,${alpha});">
+          <span style="font-size:17px; font-weight:800; color:${pct >= 45 ? "#fff" : "#B23044"};">${pct}%</span>
+        </div>`;
+    }).join("");
+    return `<div>
+        <div style="display:flex; align-items:center; justify-content:center; gap:6px; margin-bottom:8px;">
+          <span style="font-size:10px; font-weight:800; color:${PAL.contra}; text-transform:uppercase; letter-spacing:0.4px;">% Incidencia de tiro</span>
+          <span style="background:${PAL.contraBg}; color:${PAL.contra}; font-size:9px; font-weight:800; border-radius:9px; padding:1px 7px;">${total}</span>
+        </div>
+        ${courtFrame(cellsHtml)}
       </div>`;
   })();
 
   const shotsHtml = !totShots ? "" : `${sectionTitle("🎯", "Tiros")}
-    <div style="display:grid; grid-template-columns:1.6fr 1fr; gap:16px; align-items:start;">
-      <div style="border:1px solid #eee; border-radius:9px; padding:12px; display:flex; gap:10px; overflow-x:auto; break-inside:avoid;">${shotsByPlayerHtml}</div>
-      <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">${donutHtml}</div>
-    </div>`;
-
-  /* ---- Campogramas: dónde pasó cada tiro, pérdida y recuperación. Estático
-     a propósito (sin desplegable ni JavaScript): un jugador con varias
-     acciones en la misma zona sale una vez, con foto, nombre y ×veces --
-     así se ve todo de un vistazo y no complica rasterizar la página para
-     el PDF. Un campograma por tipo de tiro (a puerta / fuera / gol), y
-     debajo, con el mismo formato, pérdidas y recuperaciones. ---- */
-  const miniPitchHtml = (events, color, emptyLabel) => {
-    if (!events.length) return `<div style="font-size:10px; color:#aaa; text-align:center; padding:24px 0;">${esc(emptyLabel)}</div>`;
-    const byZone = new Map();
-    events.forEach((ev) => {
-      if (!byZone.has(ev.zone)) byZone.set(ev.zone, new Map());
-      const byPlayer = byZone.get(ev.zone);
-      const key = ev.playerId || ev.playerName;
-      if (!byPlayer.has(key)) byPlayer.set(key, { ev, count: 0 });
-      byPlayer.get(key).count++;
-    });
-    const cellsHtml = PITCH_ZONES.map((z) => {
-      const byPlayer = byZone.get(z.key);
-      const chipsHtml = byPlayer ? [...byPlayer.values()].map(({ ev, count }) => `
-          <div style="display:flex; flex-direction:column; align-items:center; margin:2px;">
-            ${avatarImg({ id: ev.playerId, name: ev.playerName, number: ev.playerNumber }, 20)}
-            <div style="font-size:6px; font-weight:700; color:#333; max-width:32px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc((ev.playerName || "").split(" ")[0])}</div>
-            <div style="font-size:7px; font-weight:800; color:${color};">×${count}</div>
-          </div>`).join("") : "";
-      return `<div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,0.35); min-height:58px; padding:2px;">${chipsHtml}</div>`;
-    }).join("");
-    return `<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:2px; background:#2e8f57; border-radius:8px; padding:2px; aspect-ratio:1/1.15; max-width:230px; margin:0 auto;">${cellsHtml}</div>
-      <div style="text-align:center; font-size:8px; color:#999; margin-top:5px;">Vuestra portería abajo</div>`;
-  };
-  const turnoverEvents = (match.zonedEvents || []).filter((ev) => ev.key === "turnovers");
-  const recoveryEvents = (match.zonedEvents || []).filter((ev) => ev.key === "recoveries");
-  const shotOnEvents = (match.zonedEvents || []).filter((ev) => ev.key === "shotsOn");
-  const shotOffEvents = (match.zonedEvents || []).filter((ev) => ev.key === "shotsOff");
-  // La zona de finalización de los propios goles (si se marcó al anotarlos)
-  // se pinta como un campograma más, junto a los otros dos tipos de tiro.
-  const goalZoneEvents = (match.goalEvents || []).filter((ev) => ev.type === "for" && ev.zone).map((ev) => {
-    const onCourtRow = (ev.onCourt || []).find((p) => p.id === ev.authorId);
-    return { zone: ev.zone, playerId: ev.authorId, playerName: ev.authorName, playerNumber: onCourtRow ? onCourtRow.number : "?", half: ev.half, remaining: ev.remaining };
-  });
-  const zonesPitchesHtml = (!shotOnEvents.length && !shotOffEvents.length && !goalZoneEvents.length && !turnoverEvents.length && !recoveryEvents.length) ? "" : `${sectionTitle("🗺", "Campogramas")}
-    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
-      <div style="border:1px solid #eee; border-radius:9px; padding:10px; break-inside:avoid;">
-        <div style="font-size:10px; font-weight:700; color:#2E9BD6; text-transform:uppercase; text-align:center; margin-bottom:8px;">Tiros a puerta</div>
-        ${miniPitchHtml(shotOnEvents, "#2E9BD6", "Sin tiros a puerta.")}
-      </div>
-      <div style="border:1px solid #eee; border-radius:9px; padding:10px; break-inside:avoid;">
-        <div style="font-size:10px; font-weight:700; color:#E0A030; text-transform:uppercase; text-align:center; margin-bottom:8px;">Tiros fuera</div>
-        ${miniPitchHtml(shotOffEvents, "#E0A030", "Sin tiros fuera.")}
-      </div>
-      <div style="border:1px solid #eee; border-radius:9px; padding:10px; break-inside:avoid;">
-        <div style="font-size:10px; font-weight:700; color:#1a8f5e; text-transform:uppercase; text-align:center; margin-bottom:8px;">Goles</div>
-        ${miniPitchHtml(goalZoneEvents, "#1a8f5e", "Sin goles con zona marcada.")}
+    <div style="display:grid; grid-template-columns:1.3fr 1fr; gap:14px; margin-bottom:14px; align-items:start;">
+      <div style="${CARD}"><div style="column-count:2; column-gap:16px;">${shotsByPlayerHtml}</div></div>
+      <div style="${CARD}">
+        <div style="font-size:10px; font-weight:800; color:#6b7280; text-transform:uppercase; text-align:center; margin-bottom:6px;">Distribución</div>
+        ${donutHtml}
       </div>
     </div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:14px;">
-      <div style="border:1px solid #eee; border-radius:9px; padding:10px; break-inside:avoid;">
-        <div style="font-size:10px; font-weight:700; color:#C0202E; text-transform:uppercase; text-align:center; margin-bottom:8px;">Pérdidas</div>
-        ${miniPitchHtml(turnoverEvents, "#C0202E", "Sin pérdidas registradas.")}
-      </div>
-      <div style="border:1px solid #eee; border-radius:9px; padding:10px; break-inside:avoid;">
-        <div style="font-size:10px; font-weight:700; color:#1a8f5e; text-transform:uppercase; text-align:center; margin-bottom:8px;">Recuperaciones</div>
-        ${miniPitchHtml(recoveryEvents, "#1a8f5e", "Sin recuperaciones registradas.")}
-      </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+      ${pitchCard("Tiros a puerta", PAL.blue, PAL.blueBg, shotOnEvents)}
+      ${pitchCard("Tiros fuera", PAL.orange, PAL.orangeBg, shotOffEvents)}
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      ${pitchCard("Goles", PAL.favor, PAL.favorBg, goalZoneEvents)}
+      ${incidenceHtml}
     </div>`;
 
-  /* ---- Presencia en pista: goles con cada uno dentro, y con quién más minutos junto ---- */
-  const onCourtGoalStats = new Map();
-  goals.forEach((ev) => {
-    (ev.onCourt || []).forEach((p) => {
-      const key = p.id || `${p.name}|${p.number}`;
-      if (!onCourtGoalStats.has(key)) onCourtGoalStats.set(key, { ...p, favor: 0, contra: 0 });
-      const d = onCourtGoalStats.get(key);
-      if (ev.type === "for") d.favor++; else d.contra++;
-    });
+  /* ---- Pérdidas y recuperaciones -- cada cosa en su propio dashboard ---- */
+  const discByPlayer = new Map();
+  (match.disciplineEvents || []).forEach((ev) => {
+    const key = ev.playerId || `${ev.playerName}|${ev.playerNumber}`;
+    if (!discByPlayer.has(key)) discByPlayer.set(key, { id: ev.playerId, name: ev.playerName, number: ev.playerNumber, fouls: 0, foulsReceived: 0, yellowHalves: [], redHalves: [] });
+    const d = discByPlayer.get(key);
+    if (ev.type === "fouls") d.fouls++;
+    else if (ev.type === "foulsReceived") d.foulsReceived++;
+    else if (ev.type === "yellow") d.yellowHalves.push(ev.half);
+    else if (ev.type === "red") d.redHalves.push(ev.half);
   });
-  const presenceRows = [...onCourtGoalStats.values()].sort((a, b) => (b.favor + b.contra) - (a.favor + a.contra));
-  const maxPresence = Math.max(1, ...presenceRows.map((r) => r.favor + r.contra));
-  const presenceHtml = !presenceRows.length ? `<div style="font-size:10px; color:#aaa;">Sin goles registrados.</div>` : presenceRows.map((r) => `
-      <div style="display:flex; align-items:center; gap:8px; padding:4px 0; font-size:10px;">
-        ${avatarImg(r, 20)}
-        <span style="width:64px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600;">${esc((r.name || "").split(" ")[0])}</span>
-        <span style="width:18px; text-align:right; color:#C0202E; font-weight:700;">${r.contra || ""}</span>
-        <div style="flex:1; background:#f2f2f2; border-radius:4px; height:8px; overflow:hidden;"><div style="width:${(r.favor / maxPresence) * 100}%; height:100%; background:#1a8f5e;"></div></div>
-        <span style="width:18px; color:#1a8f5e; font-weight:700;">${r.favor || ""}</span>
+
+  const totalRecoveries = squadRows.reduce((s, p) => s + (p.recoveries || 0), 0);
+  const totalTurnovers = squadRows.reduce((s, p) => s + (p.turnovers || 0), 0);
+
+  const recTurnDonutHtml = (() => {
+    const total = totalRecoveries + totalTurnovers;
+    if (!total) return `<div style="font-size:10px; color:#aaa; text-align:center;">Sin registros.</div>`;
+    const R = 42, cx = 55, cy = 55, sw = 15, circ = 2 * Math.PI * R;
+    let offset = 0;
+    const seg = (value, color) => {
+      const dash = (value / total) * circ;
+      const el = `<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-dasharray="${dash} ${circ - dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})" />`;
+      offset += dash;
+      return el;
+    };
+    return `<svg viewBox="0 0 110 110" style="width:120px; height:120px; display:block; margin:0 auto;">${seg(totalTurnovers, PAL.contra)}${seg(totalRecoveries, PAL.favor)}</svg>
+      <div style="display:flex; flex-direction:column; gap:4px; font-size:9px; margin-top:10px;">
+        <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${PAL.favor};"></span> Recuperaciones: <b>${totalRecoveries}</b> (${Math.round((totalRecoveries / total) * 100)}%)</span>
+        <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${PAL.contra};"></span> Pérdidas: <b>${totalTurnovers}</b> (${Math.round((totalTurnovers / total) * 100)}%)</span>
+      </div>`;
+  })();
+
+  const recPerRows = squadRows.filter((p) => (p.recoveries || 0) + (p.turnovers || 0) > 0)
+    .sort((a, b) => ((b.recoveries || 0) + (b.turnovers || 0)) - ((a.recoveries || 0) + (a.turnovers || 0)));
+  const recPerTableHtml = !recPerRows.length ? `<div style="font-size:10px; color:#aaa;">Sin registros.</div>` : `
+    <div style="display:flex; font-size:8px; font-weight:800; color:#9aa0a6; text-transform:uppercase; padding:0 0 6px; border-bottom:1px solid #eef0f2; margin-bottom:4px;">
+      <span style="flex:1;">Jugador</span><span style="width:34px; text-align:center; color:${PAL.favor};">Rec</span><span style="width:34px; text-align:center; color:${PAL.contra};">Pér</span>
+    </div>
+    ${recPerRows.map((p) => `<div style="display:flex; align-items:center; gap:7px; padding:4px 0; font-size:10px;">
+        ${avatarImg(p, 20)}<span style="flex:1; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(p.name)}</span>
+        <span style="width:34px; text-align:center; font-weight:800; color:${PAL.favor};">${p.recoveries || 0}</span>
+        <span style="width:34px; text-align:center; font-weight:800; color:${PAL.contra};">${p.turnovers || 0}</span>
+      </div>`).join("")}`;
+
+  const zonePctLinesFor = (events, total, label, color) => {
+    const byZone = new Map();
+    events.forEach((ev) => byZone.set(ev.zone, (byZone.get(ev.zone) || 0) + 1));
+    return PITCH_ZONES.map((z) => {
+      const c = byZone.get(z.key) || 0;
+      if (!c) return "";
+      const pct = total ? Math.round((c / total) * 100) : 0;
+      return `<div style="font-size:6.5px; font-weight:800; color:${color}; line-height:1.3;">${label} ${c}·${pct}%</div>`;
+    });
+  };
+  const recZoneLines = zonePctLinesFor(recoveryEvents, totalRecoveries, "R", PAL.favor);
+  const turnZoneLines = zonePctLinesFor(turnoverEvents, totalTurnovers, "P", PAL.contra);
+  const zonePctCellsHtml = PITCH_ZONES.map((z, i) => zoneCell([recZoneLines[i], turnZoneLines[i]].filter(Boolean))).join("");
+
+  const foulsAndCardsRows = [...discByPlayer.values()].filter((d) => d.fouls || d.foulsReceived || d.yellowHalves.length || d.redHalves.length)
+    .sort((a, b) => (b.fouls + b.foulsReceived + b.yellowHalves.length + b.redHalves.length) - (a.fouls + a.foulsReceived + a.yellowHalves.length + a.redHalves.length));
+  const foulsAndCardsHtml = !foulsAndCardsRows.length ? `<div style="font-size:10px; color:#aaa;">Sin faltas ni tarjetas.</div>` : foulsAndCardsRows.map((d) => `
+      <div style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:10px;">
+        ${avatarImg(d, 22)}
+        <span style="flex:1; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(d.name)}</span>
+        ${d.fouls ? `<span style="color:${PAL.contra}; font-weight:700;">↩ ${d.fouls}</span>` : ""}
+        ${d.foulsReceived ? `<span style="color:${PAL.favor}; font-weight:700;">↪ ${d.foulsReceived}</span>` : ""}
+        ${d.yellowHalves.map(() => `<span style="background:${PAL.amber}; color:#fff; border-radius:3px; padding:2px 6px; font-weight:700; font-size:9px;">🟨</span>`).join("")}
+        ${d.redHalves.map(() => `<span style="background:#8B2635; color:#fff; border-radius:3px; padding:2px 6px; font-weight:700; font-size:9px;">🟥</span>`).join("")}
       </div>`).join("");
 
-  // Foto y nombre de cada combinación, con el mismo lenguaje visual que ya
-  // usa el quinteto en pista de cada gol.
-  const rowOf = (id) => {
-    const g = rotGroups.find((x) => x.playerId === id);
-    return g ? { id, name: g.name, number: g.number } : { id, name: "?", number: "?" };
-  };
-  const comboRow = (combo, seconds) => `<div style="display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid #f7f7f7;">
-        <div style="display:flex; gap:4px; flex:1; flex-wrap:wrap;">
-          ${combo.map((id) => {
-            const row = rowOf(id);
-            return `<div style="text-align:center; width:34px;">
-                ${avatarImg(row, 26)}
-                <div style="font-size:7px; color:#666; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc((row.name || "").split(" ")[0])}</div>
-              </div>`;
-          }).join("")}
-        </div>
-        <span style="font-weight:700; color:#2E9BD6; flex-shrink:0; font-size:11px;">${fmtMin(seconds)}</span>
-      </div>`;
-  // Los porteros no cuentan para "más minutos juntos" -- casi siempre están
-  // los 40 minutos en pista sin que eso diga nada táctico, y dominarían
-  // todas las combinaciones.
-  const gkIds = new Set(squadRows.filter((p) => p.isGK).map((p) => p.id));
-  const outfieldRotations = (match.rotations || []).filter((r) => !gkIds.has(r.playerId));
-  const pairs = topCombosTogether(outfieldRotations, 2, 4);
-  const trios = topCombosTogether(outfieldRotations, 3, 4);
-  const quartets = topCombosTogether(outfieldRotations, 4, 4);
-  const pairingHtml = (!pairs.length && !trios.length && !quartets.length) ? `<div style="font-size:10px; color:#aaa;">No hay suficientes rotaciones para calcularlo.</div>` : `
-      ${pairs.length ? `<div style="font-size:9px; font-weight:700; color:#999; text-transform:uppercase; margin:6px 0 2px;">Parejas</div>${pairs.map((r) => comboRow(r.combo, r.seconds)).join("")}` : ""}
-      ${trios.length ? `<div style="font-size:9px; font-weight:700; color:#999; text-transform:uppercase; margin:6px 0 2px;">Tríos</div>${trios.map((r) => comboRow(r.combo, r.seconds)).join("")}` : ""}
-      ${quartets.length ? `<div style="font-size:9px; font-weight:700; color:#999; text-transform:uppercase; margin:6px 0 2px;">Cuartetos</div>${quartets.map((r) => comboRow(r.combo, r.seconds)).join("")}` : ""}`;
-
-  const presenceSectionHtml = (!presenceRows.length && !pairs.length && !trios.length && !quartets.length) ? "" : `${sectionTitle("👥", "Presencia en pista")}
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
-      <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">
-        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; margin-bottom:8px;">Goles en pista <span style="color:#C0202E;">en contra</span> · <span style="color:#1a8f5e;">a favor</span></div>
-        ${presenceHtml}
+  const turnoverRecoverySectionHtml = (!turnoverEvents.length && !recoveryEvents.length && !foulsAndCardsRows.length) ? "" : `${sectionTitle("🔄", "Pérdidas y recuperaciones")}
+    <div style="display:grid; grid-template-columns:1fr 1.3fr; gap:14px; margin-bottom:14px;">
+      <div style="${CARD}">${recTurnDonutHtml}</div>
+      <div style="${CARD}">${recPerTableHtml}</div>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+      <div style="${CARD}">
+        <div style="font-size:10px; font-weight:800; color:#6b7280; text-transform:uppercase; text-align:center; margin-bottom:8px;">% por zona</div>
+        ${courtFrame(zonePctCellsHtml)}
       </div>
-      <div style="border:1px solid #eee; border-radius:9px; padding:12px; break-inside:avoid;">
-        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase;">Más minutos juntos</div>
-        ${pairingHtml}
+      <div style="${CARD}">
+        <div style="font-size:10px; font-weight:800; color:#6b7280; text-transform:uppercase; margin-bottom:8px;">Faltas y amarillas</div>
+        ${foulsAndCardsHtml}
       </div>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      ${pitchCard("Pérdidas", PAL.contra, PAL.contraBg, turnoverEvents)}
+      ${pitchCard("Recuperaciones", PAL.favor, PAL.favorBg, recoveryEvents)}
     </div>`;
 
   /* ---- Fichas de jugadores, agrupado por posición ---- */
-  const statChip = (icon, val, color) => val ? `<span style="color:${color}; font-weight:700; margin-right:6px;">${icon} ${val}</span>` : "";
+  const statPill = (icon, val, color, bg) => val ? `<span style="display:inline-flex; align-items:center; gap:3px; background:${bg}; color:${color}; font-weight:800; border-radius:5px; padding:2px 6px; font-size:9px; margin-right:5px;">${icon} ${val}</span>` : "";
+  // Goles encajados mientras este portero estaba en pista -- se cruza el
+  // minuto del gol en contra con sus tramos de rotación de esa parte.
+  const concededBy = (row) => {
+    const g = rotFor(row);
+    if (!g) return 0;
+    let n = 0;
+    (match.goalEvents || []).filter((ev) => ev.type === "contra").forEach((ev) => {
+      const h = g.halves.get(ev.half);
+      if (!h) return;
+      if (h.list.some((iv) => ev.remaining <= iv.startRemaining && ev.remaining >= iv.endRemaining)) n++;
+    });
+    return n;
+  };
   const fichaCard = (row) => {
     const g = rotFor(row);
     const halvesHtml = presentHalves.map((half) => {
       const h = g && g.halves.get(half);
       if (!h) return "";
       const chips = h.list.map((r) => `${fmtClock(r.startRemaining)}→${fmtClock(r.endRemaining)} <b>${fmtMin(r.durationSeconds)}</b>`).join(" · ");
-      return `<div style="font-size:8px; color:#666; margin-bottom:2px;"><b style="color:#333;">${esc(halfLabel(half))}:</b> ${chips || "—"}</div>`;
+      return `<div style="font-size:8.5px; color:#7a808a; margin-bottom:2px;"><b style="color:#333;">${esc(halfLabel(half))}:</b> ${chips || "—"}</div>`;
     }).join("");
-    return `<div style="border:1px solid #eee; border-radius:9px; padding:10px; display:flex; gap:10px; align-items:flex-start; break-inside:avoid;">
-        ${avatarImg(row, 38)}
+    const nameRow = row.isGK ? `<div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <div style="font-size:12.5px; font-weight:800;">#${esc(row.number)} ${esc(row.name)}</div>
+          <div style="display:flex; gap:12px; text-align:center; flex-shrink:0;">
+            <div><div style="font-size:16px; font-weight:800; color:${PAL.favor};">${row.saves || 0}</div><div style="font-size:6px; color:#9aa0a6; text-transform:uppercase; font-weight:700;">Paradas</div></div>
+            <div><div style="font-size:16px; font-weight:800; color:${PAL.contra};">${concededBy(row)}</div><div style="font-size:6px; color:#9aa0a6; text-transform:uppercase; font-weight:700;">Encajados</div></div>
+          </div>
+        </div>` : `<div style="font-size:12.5px; font-weight:800;">#${esc(row.number)} ${esc(row.name)}</div>`;
+    return `<div style="border:1px solid #e6e8eb; border-radius:11px; padding:11px; display:flex; gap:11px; align-items:flex-start; background:#fff; break-inside:avoid;">
+        ${avatarImg(row, 42)}
         <div style="flex:1; min-width:0;">
-          <div style="font-size:12px; font-weight:800;">#${esc(row.number)} ${esc(row.name)}</div>
+          ${nameRow}
           ${halvesHtml}
-          <div style="font-size:9px; margin-top:3px;">
-            ${statChip("⚽", row.goals, "#1a8f5e")}${statChip("🅰", row.assists, "#2E9BD6")}${statChip("🟨", row.yellow, "#E3B23C")}${statChip("🟥", row.red, "#8B2635")}${row.isGK ? statChip("🧤", row.saves, "#2E9BD6") : ""}
+          <div style="margin-top:4px;">
+            ${statPill("⚽", row.goals, PAL.favor, PAL.favorBg)}${statPill("🅰", row.assists, PAL.blue, PAL.blueBg)}${statPill("🟨", row.yellow, "#9a7a1f", "#FBF1D8")}${statPill("🟥", row.red, "#8B2635", "#FBE6E9")}
           </div>
         </div>
         <div style="text-align:right; flex-shrink:0;">
-          <div style="font-size:14px; font-weight:800;">${fmtMin(row.seconds)}</div>
-          <div style="font-size:7px; color:#999; text-transform:uppercase;">Total</div>
+          <div style="font-size:15px; font-weight:800;">${fmtMin(row.seconds)}</div>
+          <div style="font-size:7px; color:#9aa0a6; text-transform:uppercase; font-weight:700;">Total</div>
         </div>
       </div>`;
   };
-  const fichasHtml = byPosition(fichaCard);
+  const fichasHtml = byPositionGrid(fichaCard);
 
   const halvesScoreLine = presentHalves.map((h) => { const sc = halfScore(match, h); return `${esc(halfLabel(h))}: ${sc.favor}-${sc.contra}`; }).join(" · ");
 
   // Datos de cabecera que se piden al pulsar "Crear informe" (ciudad, hora de
-  // fin, material de la pista, competición) — se muestran como chips dentro
-  // de la propia cabecera roja, para que se noten a simple vista y no como
-  // una línea de letra pequeña debajo. Opcionales: solo aparece el chip de
-  // lo que de verdad se rellenó.
+  // fin, material de la pista, competición) — se muestran como una línea de
+  // chips discretos dentro de la propia cabecera, para que se noten a
+  // simple vista sin competir con el marcador. Opcionales: solo aparece el
+  // chip de lo que de verdad se rellenó.
   const hours = match.startTime || match.endTime ? `${esc(match.startTime || "?")}–${esc(match.endTime || "?")}` : null;
-  const metaChip = (icon, text) => (text ? `<span style="display:inline-flex; align-items:center; gap:5px; background:rgba(255,255,255,0.22); border:1px solid rgba(255,255,255,0.35); border-radius:20px; padding:6px 12px; font-size:13px; font-weight:700; white-space:nowrap;"><span style="font-size:14px;">${icon}</span>${esc(text)}</span>` : "");
-  const metaChipsHtml = [metaChip("📅", dateStr), metaChip("🕐", hours), metaChip("📍", match.city), metaChip("🏟", match.venue), metaChip("🪵", match.pitchMaterial), metaChip("🏆", match.competition)].filter(Boolean).join("");
+  const metaChip = (icon, text) => (text ? `<span style="display:inline-flex; align-items:center; gap:4px; font-size:10.5px; font-weight:600; color:rgba(255,255,255,0.85);">${icon} ${esc(text)}</span>` : "");
+  const metaLine = [metaChip("📅", dateStr), metaChip("🕐", hours), metaChip("📍", match.city), metaChip("🏟", match.venue), metaChip("🪵", match.pitchMaterial)].filter(Boolean);
+  const competitionLabel = match.competition ? esc(match.competition).toUpperCase() : "PARTIDO";
 
   const headerHtml = `
-    <div style="background: linear-gradient(120deg, #7A1620, #E63946); border-radius: 12px; padding: 14px 18px; color:#fff; margin-bottom: 10px;">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <div style="display:flex; align-items:center; gap:10px;">
-          <div style="width:44px; height:44px; border-radius:9px; background:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0;">
-            ${teamCrest ? `<img src="${teamCrest}" style="width:100%; height:100%; object-fit:cover;" />` : `<span style="font-size:18px;">🛡</span>`}
+    <div style="background: linear-gradient(120deg, #7A1620, #C0202E); border-radius: 14px; padding: 18px 22px; color:#fff; margin-bottom: 12px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div style="width:48px; height:48px; border-radius:11px; background:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0;">
+            ${teamCrest ? `<img src="${teamCrest}" style="width:100%; height:100%; object-fit:cover;" />` : `<span style="font-size:20px;">🛡</span>`}
           </div>
           <div>
-            <div style="font-size:16px; font-weight:800; line-height:1.2;">${esc(teamName || "Equipo")}</div>
-            <div style="font-size:9px; opacity:0.85;">Informe de partido</div>
+            <div style="font-size:18px; font-weight:800; line-height:1.2;">${esc(teamName || "Equipo")}</div>
+            <div style="font-size:10px; opacity:0.8;">Informe de partido</div>
           </div>
         </div>
         <div style="text-align:right;">
-          <div style="display:flex; align-items:center; gap:8px; justify-content:flex-end;">
+          <div style="font-size:9.5px; font-weight:700; letter-spacing:1px; opacity:0.75; text-transform:uppercase; margin-bottom:6px;">${competitionLabel} · ${esc(dateStr)}</div>
+          <div style="display:flex; align-items:center; gap:10px; justify-content:flex-end;">
             <span style="font-size:14px; font-weight:700;">${esc(teamName || "Equipo")}</span>
-            <span style="background:#fff; color:#111; border-radius:8px; padding:3px 12px; font-size:16px; font-weight:800;">${esc(match.teamGoals)} - ${esc(match.rivalScore)}</span>
+            <span style="background:rgba(255,255,255,0.96); color:#15181c; border-radius:9px; padding:5px 14px; font-size:18px; font-weight:800; letter-spacing:0.5px;">${esc(match.teamGoals)} - ${esc(match.rivalScore)}</span>
             <span style="font-size:14px; font-weight:700;">${esc(match.rivalName || "Rival")}</span>
             ${match.rivalCrest ? `<img src="${match.rivalCrest}" style="width:26px; height:26px; border-radius:6px; object-fit:cover; background:#fff;" />` : ""}
           </div>
         </div>
       </div>
-      ${metaChipsHtml ? `<div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.3);">${metaChipsHtml}</div>` : ""}
+      ${metaLine.length ? `<div style="display:flex; flex-wrap:wrap; gap:12px; margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.25);">${metaLine.join("")}</div>` : ""}
     </div>
-    <div style="font-size:10px; color:#666; margin-bottom:6px;">
+    <div style="font-size:10px; color:#6b7280; margin-bottom:6px;">
       ${halvesScoreLine} ·
       Ocasiones a favor: ${esc(match.occFor)} · Ocasiones en contra: ${esc(match.occAgainst)} · Duración parte: ${esc(match.halfLength)} min
     </div>
-    ${match.observations ? `<div style="background:#fff7e6; border:1px solid #f0dca0; border-radius:8px; padding:7px 12px; font-size:10px; color:#665; margin-bottom:10px;"><b style="color:#333;">Observaciones:</b> ${esc(match.observations)}</div>` : ""}`;
+    ${match.observations ? `<div style="background:#FEF8E7; border:1px solid #F0DCA0; border-radius:8px; padding:8px 12px; font-size:10px; color:#665; margin-bottom:10px;"><b style="color:#333;">Observaciones:</b> ${esc(match.observations)}</div>` : ""}`;
 
   return `
-    <div style="font-family: Arial, Helvetica, sans-serif; color:#111; padding:22px; max-width:900px; margin:0 auto; background:#fff;">
+    <div style="font-family: Arial, Helvetica, sans-serif; color:#15181c; padding:24px; max-width:900px; margin:0 auto; background:#fff;">
       ${headerHtml}
       ${sectionTitle("⏱", "Minutos y rotaciones")}
       ${minutesHtml}
       ${minutesRankingHtml}
       ${goalsHtml}
       ${timelineHtml}
-      ${disciplineHtml}
-      ${shotsHtml}
-      ${zonesPitchesHtml}
       ${presenceSectionHtml}
+      ${shotsHtml}
+      ${turnoverRecoverySectionHtml}
       ${sectionTitle("👤", "Fichas de jugadores")}
       ${fichasHtml}
     </div>`;
