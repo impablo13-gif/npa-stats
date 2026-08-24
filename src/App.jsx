@@ -2355,15 +2355,17 @@ export default function App() {
       }
 
       // Roja (directa o por doble amarilla): el jugador queda expulsado el
-      // resto del partido -- si estaba en pista, sale ya mismo -- y el
-      // equipo juega con uno menos 2 minutos de juego o hasta que el rival
-      // marque (lo que pase antes).
+      // resto del partido. Si estaba en pista, sale ya mismo y el equipo
+      // juega con uno menos 2 minutos de juego o hasta que el rival marque
+      // (lo que pase antes) -- pero si la roja es a alguien del banquillo,
+      // no hay inferioridad: se sigue en 5 contra 5, ese jugador solo pierde
+      // la opción de volver a jugar el resto del partido.
       if (key === "red") {
         if (onCourtRef.current.includes(playerId)) {
           closeStint(playerId);
           setOnCourt((prev) => prev.filter((x) => x !== playerId));
+          setShortHandedRestrictions((prev) => [...prev, { id: ev.id, half: h, startRemaining: remainingNow }]);
         }
-        setShortHandedRestrictions((prev) => [...prev, { id: ev.id, half: h, startRemaining: remainingNow }]);
       }
     }
     setLastEvent({ playerId, key, half: h, discId });
