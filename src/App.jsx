@@ -728,8 +728,48 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
         ${goals.filter((g) => g.half === h).map(goalCard).join("")}
       </div>`;
   }).join("");
+
+  // Donut con la fase de origen de cada gol propio -- de qué juega más nos
+  // vienen los goles, de un vistazo, junto al quinteto en pista de cada uno.
+  const phaseDonutHtml = (() => {
+    const forGoals = goals.filter((g) => g.type === "for");
+    if (!forGoals.length) return `<div style="font-size:10px; color:#aaa; text-align:center;">Sin goles propios.</div>`;
+    const total = forGoals.length;
+    const counts = new Map();
+    forGoals.forEach((g) => counts.set(g.phase, (counts.get(g.phase) || 0) + 1));
+    const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    const R = 42, cx = 55, cy = 55, sw = 15, circ = 2 * Math.PI * R;
+    let offset = 0;
+    const segsHtml = entries.map(([phase, count]) => {
+      const def = GOAL_PHASES.find((p) => p.key === phase);
+      const color = def ? def.color : "#888";
+      const dash = (count / total) * circ;
+      const el = `<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-dasharray="${dash} ${circ - dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})" />`;
+      offset += dash;
+      return el;
+    }).join("");
+    const legendHtml = entries.map(([phase, count]) => {
+      const def = GOAL_PHASES.find((p) => p.key === phase);
+      const color = def ? def.color : "#888";
+      const label = def ? def.label : phase;
+      return `<div style="display:flex; align-items:center; gap:5px; font-size:8.5px;">
+          <span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:${color}; flex-shrink:0;"></span>
+          <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(label)}</span>
+          <b>${count}</b>
+        </div>`;
+    }).join("");
+    return `<svg viewBox="0 0 110 110" style="width:100px; height:100px; display:block; margin:0 auto;">${segsHtml}</svg>
+      <div style="display:flex; flex-direction:column; gap:4px; margin-top:8px;">${legendHtml}</div>`;
+  })();
+
   const goalsHtml = !goals.length ? "" : `${sectionTitle("⚽", "Goles del partido")}
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">${goalsByHalfHtml}</div>`;
+    <div style="display:grid; grid-template-columns:190px 1fr 1fr; gap:16px; align-items:start;">
+      <div data-pdf-block="true" style="${CARD}">
+        <div style="font-size:10px; font-weight:800; color:#6b7280; text-transform:uppercase; text-align:center; margin-bottom:6px;">Fases de los goles</div>
+        ${phaseDonutHtml}
+      </div>
+      ${goalsByHalfHtml}
+    </div>`;
 
   /* ---- Cronología: los goles como puntos en una línea de tiempo ---- */
   // Cada parte puede durar algo distinto (la prórroga son 3 min fijos), así
@@ -1067,6 +1107,12 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
         ${d.redHalves.map(() => `<span style="background:#8B2635; color:#fff; border-radius:3px; padding:2px 6px; font-weight:700; font-size:9px;">🟥</span>`).join("")}
       </div>`).join("");
 
+  // Faltas con zona -- ya quedan registradas con zona al anotarlas (mismo
+  // asistente en tres pasos que tiros o pérdidas), así que salen con el
+  // mismo formato de campograma por jugador, cometidas y recibidas.
+  const foulsCommittedZoned = (match.disciplineEvents || []).filter((ev) => ev.type === "fouls" && ev.zone);
+  const foulsReceivedZoned = (match.disciplineEvents || []).filter((ev) => ev.type === "foulsReceived" && ev.zone);
+
   const turnoverRecoverySectionHtml = (!turnoverEvents.length && !recoveryEvents.length && !foulsAndCardsRows.length) ? "" : `${sectionTitle("🔄", "Pérdidas y recuperaciones")}
     <div style="display:grid; grid-template-columns:1fr 1.3fr; gap:14px; margin-bottom:14px;">
       <div data-pdf-block="true" style="${CARD}">${recTurnDonutHtml}</div>
@@ -1082,9 +1128,13 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
         ${foulsAndCardsHtml}
       </div>
     </div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
       ${pitchCard("Pérdidas", PAL.contra, PAL.contraBg, turnoverEvents)}
       ${pitchCard("Recuperaciones", PAL.favor, PAL.favorBg, recoveryEvents)}
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      ${pitchCard("Faltas cometidas", PAL.contra, PAL.contraBg, foulsCommittedZoned)}
+      ${pitchCard("Faltas recibidas", PAL.favor, PAL.favorBg, foulsReceivedZoned)}
     </div>`;
 
   /* ---- Fichas de jugadores, agrupado por posición ---- */
