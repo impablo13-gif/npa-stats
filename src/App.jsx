@@ -48,7 +48,7 @@ const defaultRoster = () =>
 
 const emptyStats = () => ({
   seconds: 0, goals: 0, assists: 0, fouls: 0, foulsReceived: 0, yellow: 0, red: 0,
-  saves: 0, turnovers: 0, recoveries: 0, shotsOn: 0, shotsOff: 0,
+  saves: 0, turnovers: 0, recoveries: 0, shotsOn: 0, shotsOff: 0, shotsPost: 0,
 });
 const STAT_KEYS = Object.keys(emptyStats());
 
@@ -118,6 +118,7 @@ const STAT_DEFS = [
   { key: "assists", label: "Asistencia", icon: ArrowLeftRight, color: T.red },
   { key: "shotsOn", label: "Tiro a puerta", icon: Target, color: T.red },
   { key: "shotsOff", label: "Tiro fuera", icon: X, color: T.dim },
+  { key: "shotsPost", label: "Tiro al palo", icon: Minus, color: T.amber },
   { key: "recoveries", label: "Recuperación", icon: Shield, color: T.red },
   { key: "turnovers", label: "Pérdida", icon: Footprints, color: T.dim },
   { key: "fouls", label: "Falta cometida", icon: AlertTriangle, color: T.negative },
@@ -133,6 +134,7 @@ const STAT_DEFS = [
 const QUICK_STAT_ACTIONS = [
   { key: "shotsOn", label: "Tiro a puerta", icon: Target, color: T.red },
   { key: "shotsOff", label: "Tiro fuera", icon: X, color: T.dim },
+  { key: "shotsPost", label: "Tiro al palo", icon: Minus, color: T.amber },
   { key: "turnovers", label: "Pérdida", icon: Footprints, color: T.dim },
   { key: "recoveries", label: "Recuperación", icon: Shield, color: T.red },
   { key: "fouls", label: "Falta cometida", icon: AlertTriangle, color: T.negative },
@@ -147,8 +149,8 @@ const QUICK_STAT_ACTIONS = [
 const DISCIPLINE_KEYS = new Set(["fouls", "foulsReceived", "yellow", "red"]);
 const DISCIPLINE_LABEL = { fouls: "Falta cometida", foulsReceived: "Falta recibida", yellow: "Amarilla", red: "Roja" };
 const DISCIPLINE_COLOR = { fouls: T.negative, foulsReceived: T.red, yellow: T.amber, red: T.negative };
-const ZONED_LABEL = { turnovers: "Pérdida", recoveries: "Recuperación", shotsOn: "Tiro a puerta", shotsOff: "Tiro fuera", fouls: "Falta cometida", foulsReceived: "Falta recibida" };
-const ZONED_COLOR = { turnovers: T.dim, recoveries: T.red, shotsOn: T.red, shotsOff: T.dim, fouls: T.negative, foulsReceived: T.red };
+const ZONED_LABEL = { turnovers: "Pérdida", recoveries: "Recuperación", shotsOn: "Tiro a puerta", shotsOff: "Tiro fuera", shotsPost: "Tiro al palo", fouls: "Falta cometida", foulsReceived: "Falta recibida" };
+const ZONED_COLOR = { turnovers: T.dim, recoveries: T.red, shotsOn: T.red, shotsOff: T.dim, shotsPost: T.amber, fouls: T.negative, foulsReceived: T.red };
 
 // The bottom bar's own dedicated "Tarjeta" button opens this separate, smaller picker.
 const CARD_ACTIONS = [
@@ -168,6 +170,9 @@ const GOAL_PHASES = [
   { key: "4x5", label: "4x5", group: 4, color: "#3B82C4" },
   { key: "4x3", label: "4x3", group: 5, color: "#E08A3C" },
   { key: "3x4", label: "3x4", group: 5, color: "#E08A3C" },
+  { key: "6M (Penalti)", label: "6M (Penalti)", group: 6, color: T.red },
+  { key: "10M (Doble penalti)", label: "10M (Doble penalti)", group: 6, color: T.negative },
+  { key: "En propia", label: "En propia", group: 7, color: "#6b7280" },
 ];
 
 // Pérdidas, recuperaciones y tiros llevan zona del campo — campo propio abajo
@@ -191,7 +196,7 @@ const PITCH_ZONE_LABEL = Object.fromEntries(PITCH_ZONES.map((z) => [z.key, z.lab
 // asistente en tres pasos que ya usan los goles: acción → jugador → zona.
 // Las faltas, además, siguen llevando el minuto exacto (bump las trata
 // también como DISCIPLINE_KEYS), así que la zona se suma a lo que ya había.
-const ZONED_KEYS = new Set(["turnovers", "recoveries", "shotsOn", "shotsOff", "fouls", "foulsReceived"]);
+const ZONED_KEYS = new Set(["turnovers", "recoveries", "shotsOn", "shotsOff", "shotsPost", "fouls", "foulsReceived"]);
 
 // Some browsers rotate the <img> preview to respect a photo's EXIF orientation tag but
 // ignore that same tag when the pixels are later drawn onto a <canvas> — which is exactly
@@ -254,13 +259,13 @@ const dateLabelOf = (iso) => new Date(iso).toLocaleDateString("es-ES").replace(/
 // exportaciones, porque las asistencias faltaban en este filtro.
 const hasActivity = (p) =>
   p.seconds > 0 || p.goals || p.assists || p.fouls || p.foulsReceived || p.yellow || p.red ||
-  p.saves || p.recoveries || p.turnovers || p.shotsOn || p.shotsOff;
+  p.saves || p.recoveries || p.turnovers || p.shotsOn || p.shotsOff || p.shotsPost;
 
 const playerRow = (p) => ({
   Dorsal: p.number, Jugador: p.name, Posición: p.position,
   Minutos: fmtMin(p.seconds), "Segundos jugados": p.seconds,
   Goles: p.goals || 0, Asistencias: p.assists || 0,
-  "Tiros a puerta": p.shotsOn || 0, "Tiros fuera": p.shotsOff || 0,
+  "Tiros a puerta": p.shotsOn || 0, "Tiros fuera": p.shotsOff || 0, "Tiros al palo": p.shotsPost || 0,
   "Faltas cometidas": p.fouls || 0, "Faltas recibidas": p.foulsReceived || 0,
   Amarillas: p.yellow || 0, Rojas: p.red || 0, Paradas: p.saves || 0,
   Recuperaciones: p.recoveries || 0, Pérdidas: p.turnovers || 0,
@@ -442,8 +447,6 @@ function exportClubDataToExcel(matches, trainings, teamName) {
         "1ª parte": `${h1.favor}-${h1.contra}`,
         "2ª parte": `${h2.favor}-${h2.contra}`,
         ...(otHalves.length ? { "Prórroga": otHalves.map((h) => { const sc = halfScore(m, h); return `${sc.favor}-${sc.contra}`; }).join(" / ") } : {}),
-        "Ocasiones a favor": m.occFor,
-        "Ocasiones en contra": m.occAgainst,
         "Duración parte (min)": m.halfLength,
       };
     });
@@ -512,8 +515,6 @@ function exportSingleMatchToExcel(match, teamName) {
     "1ª parte": `${h1.favor}-${h1.contra}`,
     "2ª parte": `${h2.favor}-${h2.contra}`,
     ...(otHalves.length ? { "Prórroga": otHalves.map((h) => { const sc = halfScore(match, h); return `${sc.favor}-${sc.contra}`; }).join(" / ") } : {}),
-    "Ocasiones a favor": match.occFor,
-    "Ocasiones en contra": match.occAgainst,
     "Duración parte (min)": match.halfLength,
   }];
   addSheet(wb, summary, "Resumen");
@@ -587,7 +588,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   };
 
   const sectionTitle = (icon, text) => `
-    <div style="display:flex; align-items:center; gap:7px; font-size:13.5px; font-weight:800; color:#C0202E; text-transform:uppercase; letter-spacing:0.5px; margin:26px 0 10px; padding-bottom:7px; border-bottom:2px solid #f0f1f3;">
+    <div data-pdf-block="true" style="display:flex; align-items:center; gap:7px; font-size:13.5px; font-weight:800; color:#C0202E; text-transform:uppercase; letter-spacing:0.5px; margin:26px 0 10px; padding-bottom:7px; border-bottom:2px solid #f0f1f3;">
       <span style="font-size:15px;">${icon}</span><span>${esc(text)}</span>
     </div>`;
 
@@ -632,7 +633,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const byPosition = (rowRenderer) => POSITIONS.map((pos) => {
     const rows = squadRows.filter((p) => (p.position || "ALA") === pos);
     if (!rows.length) return "";
-    return `<div style="margin-bottom:14px; border-radius:12px; overflow:hidden; border:1px solid #e6e8eb; box-shadow:0 1px 3px rgba(15,23,32,0.05); break-inside:avoid;">
+    return `<div data-pdf-block="true" style="margin-bottom:14px; border-radius:12px; overflow:hidden; border:1px solid #e6e8eb; box-shadow:0 1px 3px rgba(15,23,32,0.05); break-inside:avoid;">
         <div style="background:${POS_GROUP_COLOR[pos]}; color:#fff; font-size:11.5px; font-weight:800; letter-spacing:1px; text-transform:uppercase; padding:9px 14px;">${POS_GROUP_ICON[pos]} ${esc(POS_LABEL[pos])}S</div>
         <div style="background:#fff;">${rows.map(rowRenderer).join("")}</div>
       </div>`;
@@ -641,7 +642,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const byPositionGrid = (rowRenderer) => POSITIONS.map((pos) => {
     const rows = squadRows.filter((p) => (p.position || "ALA") === pos);
     if (!rows.length) return "";
-    return `<div style="margin-bottom:16px;">
+    return `<div data-pdf-block="true" style="margin-bottom:16px;">
         <div style="background:${POS_GROUP_COLOR[pos]}; color:#fff; font-size:11.5px; font-weight:800; letter-spacing:1px; text-transform:uppercase; padding:9px 14px; border-radius:10px; margin-bottom:10px;">${POS_GROUP_ICON[pos]} ${esc(POS_LABEL[pos])}S</div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">${rows.map(rowRenderer).join("")}</div>
       </div>`;
@@ -655,7 +656,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const maxRankSeconds = Math.max(1, ...minutesRanking.map((p) => p.seconds || 0));
   const rankMedal = (i) => (i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}`);
   const minutesRankingHtml = !minutesRanking.length ? "" : `${sectionTitle("🏅", "Top 5 · Minutos en pista")}
-    <div style="${CARD}">
+    <div data-pdf-block="true" style="${CARD}">
       ${minutesRanking.map((p, i) => `
         <div style="display:flex; align-items:center; gap:10px; padding:7px 0; ${i < minutesRanking.length - 1 ? "border-bottom:1px solid #f2f3f5;" : ""}">
           <span style="width:24px; text-align:center; font-size:${i < 3 ? 16 : 12}px; font-weight:800; color:#9aa0a6;">${rankMedal(i)}</span>
@@ -672,7 +673,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
     const phaseColor = phaseDef ? phaseDef.color : "#888";
     const onCourt = ev.onCourt || [];
     const isFor = ev.type === "for";
-    return `<div style="border:1px solid ${isFor ? PAL.favorBorder : PAL.contraBorder}; background:${isFor ? PAL.favorBg : PAL.contraBg}; border-radius:10px; padding:10px 12px; margin-bottom:8px; break-inside:avoid;">
+    return `<div data-pdf-block="true" style="border:1px solid ${isFor ? PAL.favorBorder : PAL.contraBorder}; background:${isFor ? PAL.favorBg : PAL.contraBg}; border-radius:10px; padding:10px 12px; margin-bottom:8px; break-inside:avoid;">
         <div style="display:flex; align-items:center; gap:7px; margin-bottom:8px;">
           <span style="background:#15181c; color:#fff; font-size:11px; font-weight:800; border-radius:6px; padding:3px 8px;">${fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}</span>
           ${phaseDef ? `<span style="background:${phaseColor}; color:#fff; font-size:8px; font-weight:800; border-radius:5px; padding:3px 7px; text-transform:uppercase; letter-spacing:0.3px;">${esc(phaseDef.label)}</span>` : ""}
@@ -815,11 +816,11 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
 
   const presenceSectionHtml = (!presenceRows.length && !pairs.length && !trios.length && !quartets.length) ? "" : `${sectionTitle("👥", "Presencia en pista")}
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
-      <div style="${CARD}">
+      <div data-pdf-block="true" style="${CARD}">
         <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; margin-bottom:8px;">Goles en pista <span style="color:${PAL.contra};">en contra</span> · <span style="color:${PAL.favor};">a favor</span></div>
         ${presenceHtml}
       </div>
-      <div style="${CARD}">
+      <div data-pdf-block="true" style="${CARD}">
         <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase;">Más minutos juntos</div>
         ${pairingHtml}
       </div>
@@ -871,7 +872,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
     </div>`;
   const pitchCard = (label, color, bg, events) => {
     const cellsHtml = zoneLinesFor(events, color).map(zoneCell).join("");
-    return `<div>
+    return `<div data-pdf-block="true">
         <div style="display:flex; align-items:center; justify-content:center; gap:6px; margin-bottom:8px;">
           <span style="font-size:10px; font-weight:800; color:${color}; text-transform:uppercase; letter-spacing:0.4px;">${esc(label)}</span>
           <span style="background:${bg}; color:${color}; font-size:9px; font-weight:800; border-radius:9px; padding:1px 7px;">${events.length}</span>
@@ -884,6 +885,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const recoveryEvents = (match.zonedEvents || []).filter((ev) => ev.key === "recoveries");
   const shotOnEvents = (match.zonedEvents || []).filter((ev) => ev.key === "shotsOn");
   const shotOffEvents = (match.zonedEvents || []).filter((ev) => ev.key === "shotsOff");
+  const shotPostEvents = (match.zonedEvents || []).filter((ev) => ev.key === "shotsPost");
   // La zona de finalización de los propios goles (si se marcó al anotarlos)
   // se pinta como un campograma más, junto a los otros dos tipos de tiro.
   const goalZoneEvents = (match.goalEvents || []).filter((ev) => ev.type === "for" && ev.zone).map((ev) => {
@@ -891,18 +893,18 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
     return { zone: ev.zone, playerId: ev.authorId, playerName: ev.authorName, playerNumber: onCourtRow ? onCourtRow.number : "?", half: ev.half, remaining: ev.remaining };
   });
 
-  /* ---- Tiros: por jugador, proporción a puerta/fuera/gol, campogramas ---- */
-  const shooters = squadRows.filter((p) => (p.shotsOn || 0) + (p.shotsOff || 0) + (p.goals || 0) > 0)
-    .sort((a, b) => ((b.shotsOn || 0) + (b.shotsOff || 0) + (b.goals || 0)) - ((a.shotsOn || 0) + (a.shotsOff || 0) + (a.goals || 0)));
+  /* ---- Tiros: por jugador, proporción a puerta/fuera/palo/gol, campogramas ---- */
+  const shooters = squadRows.filter((p) => (p.shotsOn || 0) + (p.shotsOff || 0) + (p.shotsPost || 0) + (p.goals || 0) > 0)
+    .sort((a, b) => ((b.shotsOn || 0) + (b.shotsOff || 0) + (b.shotsPost || 0) + (b.goals || 0)) - ((a.shotsOn || 0) + (a.shotsOff || 0) + (a.shotsPost || 0) + (a.goals || 0)));
 
   const shotsByPlayerHtml = shooters.map((p) => {
-    const total = (p.shotsOn || 0) + (p.shotsOff || 0) + (p.goals || 0);
+    const total = (p.shotsOn || 0) + (p.shotsOff || 0) + (p.shotsPost || 0) + (p.goals || 0);
     const badge = (label, val, color) => val ? `<span style="color:${color}; font-weight:700; margin-right:6px;">${label}×${val}</span>` : "";
     return `<div style="display:flex; align-items:center; gap:8px; padding:5px 0; break-inside:avoid;">
         ${avatarImg(p, 26)}
         <div style="flex:1; min-width:0;">
           <div style="font-size:11px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(p.name)}</div>
-          <div style="font-size:8.5px;">${badge("P", p.shotsOn, PAL.blue)}${badge("F", p.shotsOff, PAL.orange)}${badge("G", p.goals, PAL.favor)}</div>
+          <div style="font-size:8.5px;">${badge("P", p.shotsOn, PAL.blue)}${badge("F", p.shotsOff, PAL.orange)}${badge("T", p.shotsPost, PAL.amber)}${badge("G", p.goals, PAL.favor)}</div>
         </div>
         <span style="font-size:15px; font-weight:800;">${total}</span>
       </div>`;
@@ -910,8 +912,9 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
 
   const totShotsOn = squadRows.reduce((s, p) => s + (p.shotsOn || 0), 0);
   const totShotsOff = squadRows.reduce((s, p) => s + (p.shotsOff || 0), 0);
+  const totShotsPost = squadRows.reduce((s, p) => s + (p.shotsPost || 0), 0);
   const totGoals = squadRows.reduce((s, p) => s + (p.goals || 0), 0);
-  const totShots = totShotsOn + totShotsOff + totGoals;
+  const totShots = totShotsOn + totShotsOff + totShotsPost + totGoals;
 
   const donutHtml = (() => {
     if (!totShots) return `<div style="font-size:10px; color:#aaa; text-align:center;">Sin tiros registrados.</div>`;
@@ -923,16 +926,17 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
       offset += dash;
       return el;
     };
-    return `<svg viewBox="0 0 110 110" style="width:120px; height:120px; display:block; margin:0 auto;">${seg(totShotsOn, PAL.blue)}${seg(totShotsOff, PAL.orange)}${seg(totGoals, PAL.favor)}</svg>
+    return `<svg viewBox="0 0 110 110" style="width:120px; height:120px; display:block; margin:0 auto;">${seg(totShotsOn, PAL.blue)}${seg(totShotsOff, PAL.orange)}${seg(totShotsPost, PAL.amber)}${seg(totGoals, PAL.favor)}</svg>
       <div style="display:flex; flex-direction:column; gap:4px; font-size:9px; margin-top:10px;">
         <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${PAL.blue};"></span> A puerta: <b>${totShotsOn}</b> (${Math.round((totShotsOn / totShots) * 100)}%)</span>
         <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${PAL.orange};"></span> Fuera: <b>${totShotsOff}</b> (${Math.round((totShotsOff / totShots) * 100)}%)</span>
+        <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${PAL.amber};"></span> Al palo: <b>${totShotsPost}</b> (${Math.round((totShotsPost / totShots) * 100)}%)</span>
         <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${PAL.favor};"></span> Gol: <b>${totGoals}</b> (${Math.round((totGoals / totShots) * 100)}%)</span>
       </div>`;
   })();
 
   const incidenceHtml = (() => {
-    const allShots = [...shotOnEvents, ...shotOffEvents, ...goalZoneEvents];
+    const allShots = [...shotOnEvents, ...shotOffEvents, ...shotPostEvents, ...goalZoneEvents];
     if (!allShots.length) return "";
     const rowCounts = [0, 0, 0];
     allShots.forEach((ev) => { const z = PITCH_ZONES.find((zz) => zz.key === ev.zone); if (z) rowCounts[z.row]++; });
@@ -944,7 +948,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
           <span style="font-size:17px; font-weight:800; color:${pct >= 45 ? "#fff" : "#B23044"};">${pct}%</span>
         </div>`;
     }).join("");
-    return `<div>
+    return `<div data-pdf-block="true">
         <div style="display:flex; align-items:center; justify-content:center; gap:6px; margin-bottom:8px;">
           <span style="font-size:10px; font-weight:800; color:${PAL.contra}; text-transform:uppercase; letter-spacing:0.4px;">% Incidencia de tiro</span>
           <span style="background:${PAL.contraBg}; color:${PAL.contra}; font-size:9px; font-weight:800; border-radius:9px; padding:1px 7px;">${total}</span>
@@ -955,15 +959,16 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
 
   const shotsHtml = !totShots ? "" : `${sectionTitle("🎯", "Tiros")}
     <div style="display:grid; grid-template-columns:1.3fr 1fr; gap:14px; margin-bottom:14px; align-items:start;">
-      <div style="${CARD}"><div style="column-count:2; column-gap:16px;">${shotsByPlayerHtml}</div></div>
-      <div style="${CARD}">
+      <div data-pdf-block="true" style="${CARD}"><div style="column-count:2; column-gap:16px;">${shotsByPlayerHtml}</div></div>
+      <div data-pdf-block="true" style="${CARD}">
         <div style="font-size:10px; font-weight:800; color:#6b7280; text-transform:uppercase; text-align:center; margin-bottom:6px;">Distribución</div>
         ${donutHtml}
       </div>
     </div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-bottom:14px;">
       ${pitchCard("Tiros a puerta", PAL.blue, PAL.blueBg, shotOnEvents)}
       ${pitchCard("Tiros fuera", PAL.orange, PAL.orangeBg, shotOffEvents)}
+      ${pitchCard("Tiros al palo", PAL.amber, "#FBF1D8", shotPostEvents)}
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
       ${pitchCard("Goles", PAL.favor, PAL.favorBg, goalZoneEvents)}
@@ -1043,15 +1048,15 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
 
   const turnoverRecoverySectionHtml = (!turnoverEvents.length && !recoveryEvents.length && !foulsAndCardsRows.length) ? "" : `${sectionTitle("🔄", "Pérdidas y recuperaciones")}
     <div style="display:grid; grid-template-columns:1fr 1.3fr; gap:14px; margin-bottom:14px;">
-      <div style="${CARD}">${recTurnDonutHtml}</div>
-      <div style="${CARD}">${recPerTableHtml}</div>
+      <div data-pdf-block="true" style="${CARD}">${recTurnDonutHtml}</div>
+      <div data-pdf-block="true" style="${CARD}">${recPerTableHtml}</div>
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
-      <div style="${CARD}">
+      <div data-pdf-block="true" style="${CARD}">
         <div style="font-size:10px; font-weight:800; color:#6b7280; text-transform:uppercase; text-align:center; margin-bottom:8px;">% por zona</div>
         ${courtFrame(zonePctCellsHtml)}
       </div>
-      <div style="${CARD}">
+      <div data-pdf-block="true" style="${CARD}">
         <div style="font-size:10px; font-weight:800; color:#6b7280; text-transform:uppercase; margin-bottom:8px;">Faltas y amarillas</div>
         ${foulsAndCardsHtml}
       </div>
@@ -1091,13 +1096,13 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
             <div><div style="font-size:16px; font-weight:800; color:${PAL.contra};">${concededBy(row)}</div><div style="font-size:6px; color:#9aa0a6; text-transform:uppercase; font-weight:700;">Encajados</div></div>
           </div>
         </div>` : `<div style="font-size:12.5px; font-weight:800;">#${esc(row.number)} ${esc(row.name)}</div>`;
-    return `<div style="border:1px solid #e6e8eb; border-radius:11px; padding:11px; display:flex; gap:11px; align-items:flex-start; background:#fff; break-inside:avoid;">
+    return `<div data-pdf-block="true" style="border:1px solid #e6e8eb; border-radius:11px; padding:11px; display:flex; gap:11px; align-items:flex-start; background:#fff; break-inside:avoid;">
         ${avatarImg(row, 42)}
         <div style="flex:1; min-width:0;">
           ${nameRow}
           ${halvesHtml}
           <div style="margin-top:4px;">
-            ${statPill("⚽", row.goals, PAL.favor, PAL.favorBg)}${statPill("🅰", row.assists, PAL.blue, PAL.blueBg)}${statPill("🟨", row.yellow, "#9a7a1f", "#FBF1D8")}${statPill("🟥", row.red, "#8B2635", "#FBE6E9")}
+            ${statPill("⚽", row.goals, PAL.favor, PAL.favorBg)}${statPill("🅰", row.assists, PAL.blue, PAL.blueBg)}${statPill("🟨", row.yellow, "#9a7a1f", "#FBF1D8")}${statPill("🟥", row.red, "#8B2635", "#FBE6E9")}${statPill("⚠", row.fouls, PAL.contra, PAL.contraBg)}
           </div>
         </div>
         <div style="text-align:right; flex-shrink:0;">
@@ -1145,8 +1150,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
       ${metaLine.length ? `<div style="display:flex; flex-wrap:wrap; gap:12px; margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.25);">${metaLine.join("")}</div>` : ""}
     </div>
     <div style="font-size:10px; color:#6b7280; margin-bottom:6px;">
-      ${halvesScoreLine} ·
-      Ocasiones a favor: ${esc(match.occFor)} · Ocasiones en contra: ${esc(match.occAgainst)} · Duración parte: ${esc(match.halfLength)} min
+      ${halvesScoreLine} · Duración parte: ${esc(match.halfLength)} min
     </div>
     ${match.observations ? `<div style="background:#FEF8E7; border:1px solid #F0DCA0; border-radius:8px; padding:8px 12px; font-size:10px; color:#665; margin-bottom:10px;"><b style="color:#333;">Observaciones:</b> ${esc(match.observations)}</div>` : ""}`;
 
@@ -1194,18 +1198,39 @@ async function exportReportToPdf(html, fileName) {
     const imgs = Array.from(container.querySelectorAll("img"));
     await Promise.all(imgs.map((img) => (img.complete ? Promise.resolve() : new Promise((res) => { img.onload = res; img.onerror = res; }))));
 
-    const fullCanvas = await html2canvas(container, { scale: 2, backgroundColor: "#ffffff", useCORS: true, width: RENDER_WIDTH, windowWidth: RENDER_WIDTH });
+    const scale = 2;
+    const fullCanvas = await html2canvas(container, { scale, backgroundColor: "#ffffff", useCORS: true, width: RENDER_WIDTH, windowWidth: RENDER_WIDTH });
+
+    // Puntos de corte seguros: el borde superior de cada bloque marcado con
+    // data-pdf-block (secciones, tarjetas, campogramas, fichas...). Cortar
+    // solo ahí, en vez de a una altura fija, evita que una página parta una
+    // tarjeta o un campograma por la mitad -- el informe sale encuadrado,
+    // aunque quede algo de margen en blanco al final de alguna página.
+    const containerTop = container.getBoundingClientRect().top;
+    const blockTops = Array.from(container.querySelectorAll("[data-pdf-block]"))
+      .map((el) => (el.getBoundingClientRect().top - containerTop) * scale)
+      .filter((y) => y > 0)
+      .sort((a, b) => a - b);
 
     const pdf = new jsPDF({ unit: "pt", format: "a4" });
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
     const scaleFactor = pageWidth / fullCanvas.width;
-    const sliceHeightPx = Math.max(1, Math.floor(pageHeight / scaleFactor));
+    const idealSliceHeightPx = Math.max(1, Math.floor(pageHeight / scaleFactor));
 
     let renderedPx = 0;
     let firstPage = true;
     while (renderedPx < fullCanvas.height) {
-      const sliceHeight = Math.min(sliceHeightPx, fullCanvas.height - renderedPx);
+      const idealEnd = Math.min(renderedPx + idealSliceHeightPx, fullCanvas.height);
+      let cut = idealEnd;
+      if (cut < fullCanvas.height) {
+        // El mejor corte seguro que quepa en esta página -- si un solo
+        // bloque es más alto que una página entera no hay corte seguro
+        // posible, y se cae al corte "ideal" sin más remedio.
+        const candidates = blockTops.filter((y) => y > renderedPx + idealSliceHeightPx * 0.4 && y <= idealEnd);
+        if (candidates.length) cut = candidates[candidates.length - 1];
+      }
+      const sliceHeight = Math.max(1, cut - renderedPx);
       const sliceCanvas = document.createElement("canvas");
       sliceCanvas.width = fullCanvas.width;
       sliceCanvas.height = sliceHeight;
@@ -1507,8 +1532,10 @@ export default function App() {
   const [matchStartTime, setMatchStartTime] = useState(null);
   const [rivalScore, setRivalScore] = useState(0);
   const [rivalCrest, setRivalCrest] = useState(null);
-  const [occFor, setOccFor] = useState(0);
-  const [occAgainst, setOccAgainst] = useState(0);
+  // Faltas acumuladas del propio equipo, por parte (se resetean solas al
+  // cambiar de parte porque se leen siempre con la parte actual como clave).
+  // Suman solas con cada "Falta cometida" y también se pueden ajustar a mano.
+  const [teamFouls, setTeamFouls] = useState({});
   const [statPlayer, setStatPlayer] = useState(null);
   const [lastEvent, setLastEvent] = useState(null);
   const [savedMatches, setSavedMatches] = useState([]);
@@ -1537,6 +1564,9 @@ export default function App() {
   // pase antes. Simplificado a la parte en la que se pitó: si cambia la
   // parte antes de cumplirse, se da por resuelta (un caso raro de por sí).
   const [shortHandedRestrictions, setShortHandedRestrictions] = useState([]);
+  // Lo mismo que arriba pero para expulsiones del RIVAL: nos deja jugar con
+  // superioridad 2 minutos de juego o hasta que marquemos, lo que pase antes.
+  const [rivalShortHandedRestrictions, setRivalShortHandedRestrictions] = useState([]);
   const [convocados, setConvocados] = useState(null); // null = not set yet (show everyone); array of player ids once chosen
   const [convocatoriaMode, setConvocatoriaMode] = useState(null); // 'nuevo' | 'editar' | null
   const [goalEvents, setGoalEvents] = useState([]); // additive historical log: every goal with author/phase/on-court snapshot
@@ -1769,7 +1799,7 @@ export default function App() {
   /* vez que la app pasa a segundo plano o se cierra.                  */
   /* ---------------------------------------------------------------- */
   const matchInProgress =
-    convocados !== null || seconds > 0 || rivalScore > 0 || goalEvents.length > 0 || occFor > 0 || occAgainst > 0;
+    convocados !== null || seconds > 0 || rivalScore > 0 || goalEvents.length > 0;
   const trainingInProgress = trainingSeconds > 0;
 
   const draftRef = useRef({ match: null, training: null, teamId: null });
@@ -1779,8 +1809,9 @@ export default function App() {
       ? {
           v: DRAFT_VERSION, savedAt: new Date().toISOString(),
           seconds, half, halfLength, rivalName, rivalScore, rivalCrest, venue, matchStartTime,
-          occFor, occAgainst, onCourt, convocados, goalEvents, disciplineEvents, zonedEvents, statsByHalf,
+          teamFouls, onCourt, convocados, goalEvents, disciplineEvents, zonedEvents, statsByHalf,
           rotations, openStints: [...stintsRef.current.entries()], chosenGoalkeeperId, shortHandedRestrictions,
+          rivalShortHandedRestrictions,
         }
       : null,
     training: trainingInProgress
@@ -2035,13 +2066,13 @@ export default function App() {
     setRivalCrest(d.rivalCrest || null);
     setVenue(d.venue || "");
     setMatchStartTime(d.matchStartTime || null);
-    setOccFor(d.occFor || 0);
-    setOccAgainst(d.occAgainst || 0);
+    setTeamFouls(d.teamFouls || {});
     setConvocados(d.convocados || null);
     setGoalEvents(d.goalEvents || []);
     setDisciplineEvents(d.disciplineEvents || []);
     setZonedEvents(d.zonedEvents || []);
     setShortHandedRestrictions(d.shortHandedRestrictions || []);
+    setRivalShortHandedRestrictions(d.rivalShortHandedRestrictions || []);
     setLastGoalEvent(null);
     setLastEvent(null);
 
@@ -2262,6 +2293,12 @@ export default function App() {
       halfMap[playerId] = { ...cur, [key]: Math.max(0, (cur[key] || 0) + delta) };
       return { ...prev, [h]: halfMap };
     });
+    // Las faltas cometidas también suman (o restan, al deshacer) al marcador
+    // de faltas acumuladas del equipo de esa parte, aparte de las que se
+    // ajusten a mano desde la cabecera.
+    if (key === "fouls") {
+      setTeamFouls((prev) => ({ ...prev, [h]: Math.max(0, (prev[h] || 0) + delta) }));
+    }
     if (delta <= 0) return;
     let discId = null;
     if (DISCIPLINE_KEYS.has(key)) {
@@ -2397,6 +2434,14 @@ export default function App() {
       bump(wizard.authorId, "goals", 1);
       if (wizard.assistId) bump(wizard.assistId, "assists", 1);
       showToast(`Gol de ${wizard.authorName}${wizard.assistId ? ` — asist. ${wizard.assistName}` : ""} — ${wizard.phase}`);
+      // Marcar nosotros resuelve la expulsión del rival más antigua que
+      // siga sirviéndose -- la superioridad dura 2 minutos de juego o hasta
+      // que marquemos, lo que pase antes.
+      setRivalShortHandedRestrictions((prev) => {
+        const idx = prev.findIndex((r) => r.half === half && (r.startRemaining - remaining) < 120);
+        if (idx === -1) return prev;
+        return prev.filter((_, i) => i !== idx);
+      });
     } else {
       setRivalScore((v) => v + 1);
       showToast(`Gol rival — ${wizard.phase}`);
@@ -2439,9 +2484,11 @@ export default function App() {
   const saveGoalEdit = (patch) => {
     if (!editingGoal) return;
     const ev = editingGoal;
-    if (ev.type === "for" && patch.authorId && patch.authorId !== ev.authorId) {
+    const newHalf = patch.half !== undefined ? patch.half : ev.half;
+    const newAuthorId = patch.authorId !== undefined ? patch.authorId : ev.authorId;
+    if (ev.type === "for" && (newAuthorId !== ev.authorId || newHalf !== ev.half)) {
       if (ev.authorId) bump(ev.authorId, "goals", -1, ev.half);
-      bump(patch.authorId, "goals", 1, ev.half);
+      if (newAuthorId) bump(newAuthorId, "goals", 1, newHalf);
     }
     setGoalEvents((prev) => prev.map((e) => (e.id === ev.id ? { ...e, ...patch } : e)));
     setEditingGoal(null);
@@ -2464,13 +2511,17 @@ export default function App() {
     const adjustGoals = (rows, playerId, delta) => rows.map((p) => (rosterMatch(p, playerId) ? { ...p, goals: Math.max(0, (p.goals || 0) + delta) } : p));
     let matchPlayers = match.players;
     let halvesArr = Array.isArray(match.halves) ? match.halves : [];
-    if (event.type === "for" && patch.authorId && patch.authorId !== event.authorId) {
+    const newHalf = patch.half !== undefined ? patch.half : event.half;
+    const newAuthorId = patch.authorId !== undefined ? patch.authorId : event.authorId;
+    if (event.type === "for" && (newAuthorId !== event.authorId || newHalf !== event.half)) {
       if (event.authorId) {
         matchPlayers = adjustGoals(matchPlayers, event.authorId, -1);
         halvesArr = halvesArr.map((h) => (h.half === event.half ? { ...h, players: adjustGoals(h.players, event.authorId, -1) } : h));
       }
-      matchPlayers = adjustGoals(matchPlayers, patch.authorId, 1);
-      halvesArr = halvesArr.map((h) => (h.half === event.half ? { ...h, players: adjustGoals(h.players, patch.authorId, 1) } : h));
+      if (newAuthorId) {
+        matchPlayers = adjustGoals(matchPlayers, newAuthorId, 1);
+        halvesArr = halvesArr.map((h) => (h.half === newHalf ? { ...h, players: adjustGoals(h.players, newAuthorId, 1) } : h));
+      }
     }
     const goalEvents = (match.goalEvents || []).map((e) => (e.id === event.id ? { ...e, ...patch } : e));
     const updated = { ...match, players: matchPlayers, halves: halvesArr, goalEvents };
@@ -2486,6 +2537,7 @@ export default function App() {
       if (!keeperOnCourtId) { showToast("No hay portero en pista"); return; }
       const gk = players.find((p) => p.id === keeperOnCourtId);
       bump(keeperOnCourtId, "saves", 1);
+      setLastGoalEvent(null);
       showToast(`Parada — ${gk ? gk.name : ""}`);
       return;
     }
@@ -2496,6 +2548,16 @@ export default function App() {
     setPendingAction({ key, label });
   };
   const armCardAction = (key, label) => { setCardsPopoverOpen(false); setPendingAction({ key, label }); };
+
+  // Expulsión de un jugador del RIVAL: no llevamos su plantilla, así que no
+  // hay jugador que tocar -- se anota directa, igual que "gol rival", y nos
+  // deja jugar con superioridad 2 minutos de juego o hasta que marquemos.
+  const armRivalExpulsion = () => {
+    const h = halfRef.current;
+    const remainingNow = Math.max(0, halfMinutesFor(h, halfLenRef.current) * 60 - secondsRef.current);
+    setRivalShortHandedRestrictions((prev) => [...prev, { id: `rexp-${Date.now()}`, half: h, startRemaining: remainingNow }]);
+    showToast("Expulsión del rival — jugáis con superioridad 2 min o hasta marcar");
+  };
   const cancelPendingAction = () => setPendingAction(null);
   const recordPendingAction = (playerId, playerName) => {
     if (!pendingAction) return;
@@ -2510,6 +2572,7 @@ export default function App() {
     if (!zonedActionWizard || !zonedActionWizard.playerId) return;
     const { key, label, playerId, playerName } = zonedActionWizard;
     bump(playerId, key, 1, null, zoneKey);
+    setLastGoalEvent(null);
     // Las faltas ya quedan registradas (con zona y minuto) en disciplineEvents
     // via bump -- no hace falta duplicarlas aquí también, o saldrían dos
     // veces en el resumen y en el Excel.
@@ -2566,7 +2629,7 @@ export default function App() {
   const resetMatch = () => {
     setClockRunning(false);
     secondsRef.current = 0;
-    setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setOccFor(0); setOccAgainst(0);
+    setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setTeamFouls({});
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setStatsByHalf({});
     rotationsRef.current = []; setRotations([]);
@@ -2577,6 +2640,7 @@ export default function App() {
     setLastEvent(null);
     setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null);
     setShortHandedRestrictions([]);
+    setRivalShortHandedRestrictions([]);
     setConvocados(null);
     clearMatchDraft(activeTeamId);
   };
@@ -2607,7 +2671,7 @@ export default function App() {
 
     setClockRunning(false);
     secondsRef.current = 0;
-    setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setOccFor(0); setOccAgainst(0);
+    setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setTeamFouls({});
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setStatsByHalf({});
     rotationsRef.current = []; setRotations([]);
@@ -2619,6 +2683,7 @@ export default function App() {
     setLastEvent(null);
     setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null);
     setShortHandedRestrictions([]);
+    setRivalShortHandedRestrictions([]);
     setConvocatoriaMode(null);
     setView("partido");
   };
@@ -2638,7 +2703,7 @@ export default function App() {
       ...emptyStats(), ...((statsMap || {})[p.id] || {}),
     }));
     const record = {
-      date: new Date().toISOString(), rivalName, teamGoals, rivalScore, occFor, occAgainst, halfLength, venue, startTime: matchStartTime,
+      date: new Date().toISOString(), rivalName, teamGoals, rivalScore, teamFouls, halfLength, venue, startTime: matchStartTime,
       // Igual que la hora de inicio, la de fin se anota sola al finalizar —
       // así, al pedir los datos del informe, ya sale rellena.
       endTime: new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }),
@@ -2691,12 +2756,13 @@ export default function App() {
     setClockRunning(false);
     setTrainingClockRunning(false);
     secondsRef.current = 0;
-    setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setOccFor(0); setOccAgainst(0);
+    setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setTeamFouls({});
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setLastEvent(null); setLastGoalEvent(null); setGoalEvents([]); setConvocados(null);
     setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null);
     setChosenGoalkeeperId(null);
     setShortHandedRestrictions([]);
+    setRivalShortHandedRestrictions([]);
     setTrainingSeconds(0);
     setLoading(true);
     setActiveTeamId(id);
@@ -2740,6 +2806,12 @@ export default function App() {
   const activeShortHanded = shortHandedRestrictions.filter((r) => r.half === half && (r.startRemaining - remaining) < 120);
   const maxOnCourt = Math.max(3, 5 - activeShortHanded.length);
   const sentOffIds = new Set(players.filter((p) => (stats[p.id] && stats[p.id].red) > 0).map((p) => p.id));
+  // Igual que arriba pero al revés: expulsiones del rival, que nos dejan a
+  // nosotros con superioridad -- no toca el máximo en pista (eso es cosa
+  // suya), solo se enseña como aviso con su propio mini-crono.
+  const activeRivalShortHanded = rivalShortHandedRestrictions.filter((r) => r.half === half && (r.startRemaining - remaining) < 120);
+  const restrictionTimeLeft = (r) => Math.max(0, 120 - (r.startRemaining - remaining));
+  const currentTeamFouls = teamFouls[half] || 0;
 
   const sortedPlayers = [...players].sort((a, b) => {
     const aOn = onCourt.includes(a.id), bOn = onCourt.includes(b.id);
@@ -2837,7 +2909,23 @@ export default function App() {
                 />
               </div>
 
-              <ClockDial seconds={remaining} progress={halfProgress} running={running} half={half} size={96} />
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                <ClockDial seconds={remaining} progress={halfProgress} running={running} half={half} size={96} />
+                {(activeShortHanded.length > 0 || activeRivalShortHanded.length > 0) && (
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "center" }}>
+                    {activeShortHanded.map((r) => (
+                      <span key={r.id} className="oswald" style={{ background: T.negative, color: "#fff", borderRadius: 7, padding: "2px 7px", fontSize: 11, fontWeight: 700 }} title="Tiempo que queda de nuestra inferioridad">
+                        🟥 {fmtClock(restrictionTimeLeft(r))}
+                      </span>
+                    ))}
+                    {activeRivalShortHanded.map((r) => (
+                      <span key={r.id} className="oswald" style={{ background: "#2E9BD6", color: "#fff", borderRadius: 7, padding: "2px 7px", fontSize: 11, fontWeight: 700 }} title="Tiempo que queda de superioridad por expulsión del rival">
+                        🟦 {fmtClock(restrictionTimeLeft(r))}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               <button onClick={() => { const next = !running; setClockRunning(next); if (next && !matchStartTime) setMatchStartTime(new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })); }} style={{ ...bigBtn, background: running ? T.negative : T.red, color: "#0A0A0A", fontSize: 24, fontWeight: 700, padding: "24px 40px", borderRadius: 16, gap: 12 }}>
                 {running ? <Pause size={32} /> : <Play size={32} />} {running ? "Pausar" : "Iniciar"}
@@ -2858,10 +2946,12 @@ export default function App() {
               {half >= 2 && half < MAX_HALVES && remaining <= 0 && (
                 <button onClick={startNextHalf} style={{ ...ghostBtn, borderColor: T.red, color: T.red }}><ChevronRight size={14} /> Empezar {halfLabel(half + 1)} (3 min)</button>
               )}
+              {view === "partido" && (
+                <button onClick={armRivalExpulsion} style={{ ...ghostBtn, borderColor: T.negative, color: T.negative }}><AlertTriangle size={13} /> Expulsión rival</button>
+              )}
               <div style={{ width: 1, height: 26, background: T.line }} />
-              <div style={{ display: "flex", gap: 10, flex: 1, minWidth: 260 }}>
-                <OccCounter label="Ocasión favor" value={occFor} color={T.red} onInc={() => setOccFor((v) => v + 1)} onDec={() => setOccFor((v) => Math.max(0, v - 1))} />
-                <OccCounter label="Ocasión contra" value={occAgainst} color={T.negative} onInc={() => setOccAgainst((v) => v + 1)} onDec={() => setOccAgainst((v) => Math.max(0, v - 1))} />
+              <div style={{ display: "flex", gap: 10, flex: 1, minWidth: 220 }}>
+                <CounterChip label="Faltas acumuladas" value={currentTeamFouls} color={T.negative} onInc={() => setTeamFouls((v) => ({ ...v, [half]: (v[half] || 0) + 1 }))} onDec={() => setTeamFouls((v) => ({ ...v, [half]: Math.max(0, (v[half] || 0) - 1) }))} />
               </div>
               {half <= 2 ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: T.dim }}>
@@ -2934,6 +3024,12 @@ export default function App() {
             {activeShortHanded.length > 0 && (
               <div style={{ background: "rgba(139,38,53,0.18)", border: `1.5px solid ${T.negative}`, borderRadius: 12, padding: "8px 14px", marginBottom: 14, fontSize: 12, color: T.text }}>
                 🟥 Jugando con {maxOnCourt} en pista — {activeShortHanded.length > 1 ? `${activeShortHanded.length} rojas sirviéndose` : "roja sirviéndose"} (2 min de juego o hasta gol del rival)
+              </div>
+            )}
+
+            {activeRivalShortHanded.length > 0 && (
+              <div style={{ background: "rgba(46,155,214,0.18)", border: "1.5px solid #2E9BD6", borderRadius: 12, padding: "8px 14px", marginBottom: 14, fontSize: 12, color: T.text }}>
+                🟦 Superioridad por expulsión del rival — {activeRivalShortHanded.length > 1 ? `${activeRivalShortHanded.length} sirviéndose` : "sirviéndose"} (2 min de juego o hasta que marquéis)
               </div>
             )}
 
@@ -3137,11 +3233,17 @@ export default function App() {
       )}
 
       {editingGoal && (
-        <GoalEditModal event={editingGoal} players={sortedPlayers} onSave={saveGoalEdit} onClose={() => setEditingGoal(null)} />
+        <GoalEditModal
+          event={editingGoal} players={sortedPlayers} onSave={saveGoalEdit} onClose={() => setEditingGoal(null)}
+          presentHalves={matchHalvesPresent({ goalEvents, disciplineEvents, zonedEvents })} halfLength={halfLength}
+        />
       )}
 
       {editingSavedGoal && (
-        <GoalEditModal event={editingSavedGoal.event} players={players} onSave={saveSavedGoalEdit} onClose={() => setEditingSavedGoal(null)} />
+        <GoalEditModal
+          event={editingSavedGoal.event} players={players} onSave={saveSavedGoalEdit} onClose={() => setEditingSavedGoal(null)}
+          presentHalves={matchHalvesPresent(editingSavedGoal.match)} halfLength={editingSavedGoal.match.halfLength}
+        />
       )}
 
       {teamManagerOpen && (
@@ -3558,7 +3660,10 @@ function AssistPopover({ goalWizard, players, onPick, onClose }) {
           <button onClick={onClose} style={iconBtnSm}><X size={16} /></button>
         </div>
 
-        <button onClick={() => onPick(null, null)} style={{ ...ghostBtn, width: "100%", justifyContent: "center", margin: "10px 0 12px" }}>Sin asistencia</button>
+        <div style={{ display: "flex", gap: 8, margin: "10px 0 12px" }}>
+          <button onClick={() => onPick(null, null)} style={{ ...ghostBtn, flex: 1, justifyContent: "center" }}>Sin asistencia</button>
+          <button onClick={() => onPick(goalWizard.authorId, goalWizard.authorName)} style={{ ...ghostBtn, flex: 1, justifyContent: "center" }} title="El propio autor generó la jugada él solo (robo, rebote propio...)">Autoasistencia</button>
+        </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto" }}>
           {players.map((p) => (
@@ -3785,7 +3890,7 @@ function GoalkeeperSwapModal({ outgoing, benchPlayers, stats, onPick, onClose })
 function StatsTable({ players, statsMap }) {
   const rows = players.filter((p) => {
     const s = statsMap[p.id];
-    return s && (s.seconds > 0 || s.goals || s.assists || s.shotsOn || s.shotsOff || s.turnovers || s.recoveries || s.fouls || s.foulsReceived || s.yellow || s.red || s.saves);
+    return s && (s.seconds > 0 || s.goals || s.assists || s.shotsOn || s.shotsOff || s.shotsPost || s.turnovers || s.recoveries || s.fouls || s.foulsReceived || s.yellow || s.red || s.saves);
   });
   if (!rows.length) {
     return <div style={{ padding: "10px 4px", color: T.dim, fontSize: 12 }}>Sin actividad registrada en esta parte.</div>;
@@ -3799,7 +3904,7 @@ function StatsTable({ players, statsMap }) {
           <tr style={{ color: T.dim, textAlign: "left" }}>
             <th style={th}>#</th><th style={th}>Jugador</th><th style={th}>Min</th>
             <th style={th}>G</th><th style={th}>A</th>
-            <th style={th}>TP</th><th style={th}>TF</th>
+            <th style={th}>TP</th><th style={th}>TF</th><th style={th}>TPa</th>
             <th style={th}>Pér</th><th style={th}>Rec</th>
             <th style={th}>FC</th><th style={th}>FR</th><th style={th}>TA</th><th style={th}>TR</th><th style={th}>Par</th>
           </tr>
@@ -3813,7 +3918,7 @@ function StatsTable({ players, statsMap }) {
                 <td style={td}>{p.name}</td>
                 <td style={td}>{fmtMin(s.seconds)}</td>
                 <td style={td}>{s.goals}</td><td style={td}>{s.assists}</td>
-                <td style={td}>{s.shotsOn}</td><td style={td}>{s.shotsOff}</td>
+                <td style={td}>{s.shotsOn}</td><td style={td}>{s.shotsOff}</td><td style={td}>{s.shotsPost || 0}</td>
                 <td style={td}>{s.turnovers}</td><td style={td}>{s.recoveries}</td>
                 <td style={td}>{s.fouls}</td><td style={td}>{s.foulsReceived || 0}</td><td style={td}>{s.yellow}</td><td style={td}>{s.red}</td><td style={td}>{s.saves}</td>
               </tr>
@@ -3847,13 +3952,21 @@ function GoalLine({ ev, onEdit }) {
   );
 }
 
-/* Editar un gol ya registrado: quién marcó (solo goles a favor) y de qué
-   fase vino. La media parte y el quinteto en pista quedan tal y como se
-   vieron en su momento — eso no se corrige, solo el autor y la fase. */
-function GoalEditModal({ event, players, onSave, onClose }) {
+/* Editar un gol ya registrado: quién marcó (solo goles a favor), de qué
+   fase vino y, ahora, también el minuto exacto (parte + tiempo restante) --
+   el quinteto en pista queda tal y como se vio en su momento, eso no se
+   toca, solo el autor, la fase y cuándo pasó. */
+function GoalEditModal({ event, players, presentHalves, halfLength, onSave, onClose }) {
   const [authorId, setAuthorId] = useState(event.authorId || null);
   const [phase, setPhase] = useState(event.phase || null);
+  const [half, setHalf] = useState(event.half || 1);
+  const initialRemaining = event.remaining !== undefined ? event.remaining : (event.seconds || 0);
+  const [mm, setMm] = useState(String(Math.floor(initialRemaining / 60)));
+  const [ss, setSs] = useState(String(initialRemaining % 60).padStart(2, "0"));
   const isFor = event.type === "for";
+  const halves = presentHalves && presentHalves.length ? presentHalves : [1, 2];
+  const maxRemaining = halfMinutesFor(half, halfLength || 20) * 60;
+  const remaining = Math.max(0, Math.min(maxRemaining, (Number(mm) || 0) * 60 + (Number(ss) || 0)));
   return (
     <div style={overlayStyle} onClick={onClose}>
       <div style={{ ...modalCard, maxWidth: 460 }} onClick={(e) => e.stopPropagation()} className="fadein">
@@ -3861,8 +3974,21 @@ function GoalEditModal({ event, players, onSave, onClose }) {
           <div className="oswald" style={{ fontSize: 17, fontWeight: 600 }}>Editar gol</div>
           <button onClick={onClose} style={iconBtnSm}><X size={16} /></button>
         </div>
-        <div style={{ fontSize: 11, color: T.dim, margin: "6px 0 12px" }}>
-          {halfLabel(event.half)} · {fmtClock(event.remaining !== undefined ? event.remaining : event.seconds)} — esto no cambia, solo quién marcó y de qué fase.
+        <div style={{ fontSize: 11, color: T.dim, margin: "6px 0 12px" }}>Se puede corregir quién marcó, de qué fase vino y el minuto exacto.</div>
+
+        <div style={{ fontSize: 11, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>¿Cuándo?</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+          {halves.map((h) => (
+            <button key={h} onClick={() => setHalf(h)} style={{ background: half === h ? T.red : "transparent", border: `1.5px solid ${T.red}`, color: half === h ? "#0A0A0A" : T.red, borderRadius: 8, padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+              {halfLabel(h)}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
+          <input type="number" value={mm} onChange={(e) => setMm(e.target.value)} min={0} style={{ width: 54, background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 6, color: T.text, padding: "6px 5px", fontSize: 15, textAlign: "center" }} />
+          <span style={{ color: T.dim }}>:</span>
+          <input type="number" value={ss} onChange={(e) => setSs(e.target.value)} min={0} max={59} style={{ width: 54, background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 6, color: T.text, padding: "6px 5px", fontSize: 15, textAlign: "center" }} />
+          <span style={{ fontSize: 11, color: T.dim }}>tiempo restante de esa parte</span>
         </div>
 
         {isFor && (
@@ -3894,7 +4020,7 @@ function GoalEditModal({ event, players, onSave, onClose }) {
           disabled={(isFor && !authorId) || !phase}
           onClick={() => {
             const author = isFor ? players.find((p) => p.id === authorId) : null;
-            onSave({ authorId: isFor ? authorId : null, authorName: isFor ? (author ? author.name : "") : null, phase });
+            onSave({ authorId: isFor ? authorId : null, authorName: isFor ? (author ? author.name : "") : null, phase, half, remaining });
           }}
           style={{ ...bigBtn, justifyContent: "center", width: "100%", background: (isFor && !authorId) || !phase ? T.surface3 : T.red, color: (isFor && !authorId) || !phase ? T.dim : "#0A0A0A", cursor: (isFor && !authorId) || !phase ? "default" : "pointer" }}
         >
@@ -4364,7 +4490,7 @@ function ClockDial({ seconds, progress, running, half, size = 68 }) {
   );
 }
 
-function OccCounter({ label, value, color, onInc, onDec }) {
+function CounterChip({ label, value, color, onInc, onDec }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 10, padding: "8px 10px", flex: 1 }}>
       <span style={{ fontSize: 11, color: T.dim, whiteSpace: "nowrap" }}>{label}</span>
@@ -4384,7 +4510,7 @@ function TabBtn({ active, onClick, icon: Icon, label }) {
 }
 
 function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, isKeeperCard, isActingKeeper, armed, onTap, onOpenStats }) {
-  const hasBadges = stats.goals > 0 || stats.yellow > 0 || stats.red > 0;
+  const hasBadges = stats.goals > 0 || stats.yellow > 0 || stats.red > 0 || stats.fouls > 0 || stats.saves > 0;
   // El portero (o portero-jugador) en pista lleva fondo propio, distinto del
   // rojo del resto — así se distingue a simple vista sin tener que leer nada.
   const cardBg = !onCourt ? T.surface : isKeeperCard ? T.gk : T.red;
@@ -4451,6 +4577,8 @@ function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, 
               {stats.goals > 0 && <MiniBadge color={fgColor}>⚽ {stats.goals}</MiniBadge>}
               {stats.yellow > 0 && <MiniBadge color={onCourt ? fgColor : T.amber}>🟨 {stats.yellow}</MiniBadge>}
               {stats.red > 0 && <MiniBadge color={onCourt ? fgColor : T.negative}>🟥 {stats.red}</MiniBadge>}
+              {stats.fouls > 0 && <MiniBadge color={fgColor}>⚠ {stats.fouls}</MiniBadge>}
+              {stats.saves > 0 && <MiniBadge color={fgColor}>🧤 {stats.saves}</MiniBadge>}
             </>
           )}
         </div>
@@ -4675,7 +4803,6 @@ function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, 
             <div style={{ fontSize: 10, color: T.dim, marginTop: 2 }}>{halves.map((h) => `${halfShortLabel(h.half)} ${scoreOf(h.half)}`).join(" · ")}</div>
           )}
         </div>
-        <div style={{ fontSize: 11, color: T.dim }}>Ocasiones {m.occFor}–{m.occAgainst}</div>
       </div>
 
       {isOpen && (
@@ -4712,7 +4839,7 @@ function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, 
                 <tr style={{ color: T.dim, textAlign: "left" }}>
                   <th style={td}>#</th><th style={td}>Jugador</th><th style={td}>Min</th>
                   <th style={td}>G</th><th style={td}>A</th>
-                  <th style={td}>TP</th><th style={td}>TF</th>
+                  <th style={td}>TP</th><th style={td}>TF</th><th style={td}>TPa</th>
                   <th style={td}>FC</th><th style={td}>FR</th>
                   <th style={td}>TA</th><th style={td}>TR</th><th style={td}>Par</th>
                   <th style={td}>Rec</th><th style={td}>Pér</th>
@@ -4725,7 +4852,7 @@ function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, 
                     <td style={td}>{p.name}</td>
                     <td style={td}>{fmtMin(p.seconds)}</td>
                     <td style={td}>{p.goals}</td><td style={td}>{p.assists}</td>
-                    <td style={td}>{p.shotsOn || 0}</td><td style={td}>{p.shotsOff || 0}</td>
+                    <td style={td}>{p.shotsOn || 0}</td><td style={td}>{p.shotsOff || 0}</td><td style={td}>{p.shotsPost || 0}</td>
                     <td style={td}>{p.fouls}</td><td style={td}>{p.foulsReceived || 0}</td><td style={td}>{p.yellow}</td>
                     <td style={td}>{p.red}</td><td style={td}>{p.saves}</td>
                     <td style={td}>{p.recoveries}</td><td style={td}>{p.turnovers}</td>
