@@ -763,12 +763,10 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   })();
 
   const goalsHtml = !goals.length ? "" : `${sectionTitle("⚽", "Goles del partido")}
-    <div style="display:grid; grid-template-columns:190px 1fr 1fr; gap:16px; align-items:start;">
-      <div data-pdf-block="true" style="${CARD}">
-        <div style="font-size:10px; font-weight:800; color:#6b7280; text-transform:uppercase; text-align:center; margin-bottom:6px;">Fases de los goles</div>
-        ${phaseDonutHtml}
-      </div>
-      ${goalsByHalfHtml}
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">${goalsByHalfHtml}</div>
+    <div data-pdf-block="true" style="${CARD} max-width:220px; margin:14px auto 0;">
+      <div style="font-size:10px; font-weight:800; color:#6b7280; text-transform:uppercase; text-align:center; margin-bottom:6px;">Fases de los goles</div>
+      ${phaseDonutHtml}
     </div>`;
 
   /* ---- Cronología: los goles como puntos en una línea de tiempo ---- */
