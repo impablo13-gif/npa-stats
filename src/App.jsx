@@ -86,6 +86,27 @@ const MAX_HALVES = 4; // 2 partes + 2 prórrogas; a partir de ahí, penaltis (fu
 const halfMinutesFor = (h, baseHalfLength) => (h <= 2 ? baseHalfLength : OT_HALF_MIN);
 const halfShortLabel = (h) => (h <= 2 ? `${h}ª` : `P${h - 2}`);
 
+// Como mucho un portero en el quinteto inicial -- nunca dos, aunque los dos
+// primeros de la convocatoria (o de la plantilla) sean porteros. Se recorre
+// en orden y se salta cualquier portero de más, dejando su hueco al
+// siguiente jugador de campo disponible. Es el mismo criterio que ya aplica
+// wouldDoubleGoalkeeper() durante el partido, pero aplicado también al
+// quinteto de salida, que antes se montaba con un simple slice(0,5) sin
+// mirar la posición.
+function pickStartingFive(ids, roster) {
+  const out = [];
+  let usedGK = false;
+  for (const id of ids || []) {
+    if (out.length >= 5) break;
+    const p = (roster || []).find((pp) => pp.id === id);
+    const isGK = p && p.position === "POR";
+    if (isGK && usedGK) continue;
+    out.push(id);
+    if (isGK) usedGK = true;
+  }
+  return out;
+}
+
 // Agrupa las rotaciones (cada entrada y salida de la pista) primero por
 // jugador y dentro de cada jugador por parte — así es como se lee en el
 // resumen y en las exportaciones: la ficha de un jugador, parte a parte.
@@ -1532,10 +1553,13 @@ export default function App() {
   const [matchStartTime, setMatchStartTime] = useState(null);
   const [rivalScore, setRivalScore] = useState(0);
   const [rivalCrest, setRivalCrest] = useState(null);
-  // Faltas acumuladas del propio equipo, por parte (se resetean solas al
+  // Faltas acumuladas de cada equipo, por parte (se resetean solas al
   // cambiar de parte porque se leen siempre con la parte actual como clave).
-  // Suman solas con cada "Falta cometida" y también se pueden ajustar a mano.
+  // Las propias suman solas con cada "Falta cometida"; las del rival, con
+  // cada "Falta recibida" (recibirla es que la cometió el rival). Las dos
+  // también se pueden ajustar a mano.
   const [teamFouls, setTeamFouls] = useState({});
+  const [rivalTeamFouls, setRivalTeamFouls] = useState({});
   const [statPlayer, setStatPlayer] = useState(null);
   const [lastEvent, setLastEvent] = useState(null);
   const [savedMatches, setSavedMatches] = useState([]);
@@ -1809,7 +1833,7 @@ export default function App() {
       ? {
           v: DRAFT_VERSION, savedAt: new Date().toISOString(),
           seconds, half, halfLength, rivalName, rivalScore, rivalCrest, venue, matchStartTime,
-          teamFouls, onCourt, convocados, goalEvents, disciplineEvents, zonedEvents, statsByHalf,
+          teamFouls, rivalTeamFouls, onCourt, convocados, goalEvents, disciplineEvents, zonedEvents, statsByHalf,
           rotations, openStints: [...stintsRef.current.entries()], chosenGoalkeeperId, shortHandedRestrictions,
           rivalShortHandedRestrictions,
         }
@@ -1932,7 +1956,7 @@ export default function App() {
     } catch (e) {}
     if (!list) list = defaultRoster();
     setPlayers(list);
-    const startingFive = list.slice(0, 5).map((p) => p.id);
+    const startingFive = pickStartingFive(list.map((p) => p.id), list);
     setOnCourt(startingFive);
     onCourtRef.current = startingFive;
     setStatsByHalf({});
@@ -2067,6 +2091,7 @@ export default function App() {
     setVenue(d.venue || "");
     setMatchStartTime(d.matchStartTime || null);
     setTeamFouls(d.teamFouls || {});
+    setRivalTeamFouls(d.rivalTeamFouls || {});
     setConvocados(d.convocados || null);
     setGoalEvents(d.goalEvents || []);
     setDisciplineEvents(d.disciplineEvents || []);
@@ -2091,7 +2116,7 @@ export default function App() {
     });
     setStatsByHalf(mergedHalves);
 
-    const oc = (d.onCourt || []).filter((id) => validIds.has(id)).slice(0, 5);
+    const oc = pickStartingFive((d.onCourt || []).filter((id) => validIds.has(id)), players);
     setOnCourt(oc);
     onCourtRef.current = oc;
 
@@ -2298,6 +2323,11 @@ export default function App() {
     // ajusten a mano desde la cabecera.
     if (key === "fouls") {
       setTeamFouls((prev) => ({ ...prev, [h]: Math.max(0, (prev[h] || 0) + delta) }));
+    }
+    // Una falta recibida es una falta que cometió el rival -- suma a su
+    // marcador de faltas acumuladas, no al nuestro.
+    if (key === "foulsReceived") {
+      setRivalTeamFouls((prev) => ({ ...prev, [h]: Math.max(0, (prev[h] || 0) + delta) }));
     }
     if (delta <= 0) return;
     let discId = null;
@@ -2629,12 +2659,12 @@ export default function App() {
   const resetMatch = () => {
     setClockRunning(false);
     secondsRef.current = 0;
-    setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setTeamFouls({});
+    setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setTeamFouls({}); setRivalTeamFouls({});
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setStatsByHalf({});
     rotationsRef.current = []; setRotations([]);
     setChosenGoalkeeperId(null);
-    const startingFive = players.slice(0, 5).map((p) => p.id);
+    const startingFive = pickStartingFive(players.map((p) => p.id), players);
     setOnCourt(startingFive); onCourtRef.current = startingFive;
     openStintsForCourt(startingFive, 1);
     setLastEvent(null);
@@ -2671,13 +2701,13 @@ export default function App() {
 
     setClockRunning(false);
     secondsRef.current = 0;
-    setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setTeamFouls({});
+    setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setTeamFouls({}); setRivalTeamFouls({});
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setStatsByHalf({});
     rotationsRef.current = []; setRotations([]);
     setChosenGoalkeeperId(null);
     setConvocados(selectedIds);
-    const startingFive = selectedIds.slice(0, 5);
+    const startingFive = pickStartingFive(selectedIds, players);
     setOnCourt(startingFive); onCourtRef.current = startingFive;
     openStintsForCourt(startingFive, 1);
     setLastEvent(null);
@@ -2703,7 +2733,7 @@ export default function App() {
       ...emptyStats(), ...((statsMap || {})[p.id] || {}),
     }));
     const record = {
-      date: new Date().toISOString(), rivalName, teamGoals, rivalScore, teamFouls, halfLength, venue, startTime: matchStartTime,
+      date: new Date().toISOString(), rivalName, teamGoals, rivalScore, teamFouls, rivalTeamFouls, halfLength, venue, startTime: matchStartTime,
       // Igual que la hora de inicio, la de fin se anota sola al finalizar —
       // así, al pedir los datos del informe, ya sale rellena.
       endTime: new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }),
@@ -2756,7 +2786,7 @@ export default function App() {
     setClockRunning(false);
     setTrainingClockRunning(false);
     secondsRef.current = 0;
-    setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setTeamFouls({});
+    setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setTeamFouls({}); setRivalTeamFouls({});
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setLastEvent(null); setLastGoalEvent(null); setGoalEvents([]); setConvocados(null);
     setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null);
@@ -2812,6 +2842,7 @@ export default function App() {
   const activeRivalShortHanded = rivalShortHandedRestrictions.filter((r) => r.half === half && (r.startRemaining - remaining) < 120);
   const restrictionTimeLeft = (r) => Math.max(0, 120 - (r.startRemaining - remaining));
   const currentTeamFouls = teamFouls[half] || 0;
+  const currentRivalTeamFouls = rivalTeamFouls[half] || 0;
 
   const sortedPlayers = [...players].sort((a, b) => {
     const aOn = onCourt.includes(a.id), bOn = onCourt.includes(b.id);
@@ -2950,8 +2981,9 @@ export default function App() {
                 <button onClick={armRivalExpulsion} style={{ ...ghostBtn, borderColor: T.negative, color: T.negative }}><AlertTriangle size={13} /> Expulsión rival</button>
               )}
               <div style={{ width: 1, height: 26, background: T.line }} />
-              <div style={{ display: "flex", gap: 10, flex: 1, minWidth: 220 }}>
-                <CounterChip label="Faltas acumuladas" value={currentTeamFouls} color={T.negative} onInc={() => setTeamFouls((v) => ({ ...v, [half]: (v[half] || 0) + 1 }))} onDec={() => setTeamFouls((v) => ({ ...v, [half]: Math.max(0, (v[half] || 0) - 1) }))} />
+              <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 280 }}>
+                <FoulsChip label="Faltas" value={currentTeamFouls} onInc={() => setTeamFouls((v) => ({ ...v, [half]: (v[half] || 0) + 1 }))} onDec={() => setTeamFouls((v) => ({ ...v, [half]: Math.max(0, (v[half] || 0) - 1) }))} />
+                <FoulsChip label="Rival" value={currentRivalTeamFouls} onInc={() => setRivalTeamFouls((v) => ({ ...v, [half]: (v[half] || 0) + 1 }))} onDec={() => setRivalTeamFouls((v) => ({ ...v, [half]: Math.max(0, (v[half] || 0) - 1) }))} />
               </div>
               {half <= 2 ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: T.dim }}>
@@ -3930,6 +3962,41 @@ function StatsTable({ players, statsMap }) {
   );
 }
 
+// Sumatorio del equipo entero para esa sección (parte o total), resaltado y
+// con brillo a propósito para que se distinga de un vistazo de la tabla
+// jugador a jugador de justo encima.
+const TEAM_TOTAL_ITEMS = [
+  { key: "goals", label: "G" }, { key: "assists", label: "A" },
+  { key: "shotsOn", label: "TP" }, { key: "shotsOff", label: "TF" }, { key: "shotsPost", label: "TPa" },
+  { key: "turnovers", label: "Pér" }, { key: "recoveries", label: "Rec" },
+  { key: "fouls", label: "FC" }, { key: "foulsReceived", label: "FR" },
+  { key: "yellow", label: "TA" }, { key: "red", label: "TR" }, { key: "saves", label: "Par" },
+];
+function TeamTotalsStrip({ players, statsMap }) {
+  const totals = {};
+  TEAM_TOTAL_ITEMS.forEach((it) => { totals[it.key] = 0; });
+  players.forEach((p) => {
+    const s = statsMap[p.id];
+    if (!s) return;
+    TEAM_TOTAL_ITEMS.forEach((it) => { totals[it.key] += s[it.key] || 0; });
+  });
+  return (
+    <div style={{
+      display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginTop: 8, padding: "10px 14px",
+      background: "linear-gradient(135deg, rgba(230,57,70,0.16), rgba(122,22,32,0.08))",
+      border: `1.5px solid ${T.red}`, borderRadius: 10, boxShadow: "0 0 16px rgba(230,57,70,0.3)",
+    }}>
+      <span style={{ fontSize: 9, fontWeight: 800, color: T.red, textTransform: "uppercase", letterSpacing: 0.6 }}>Total equipo</span>
+      {TEAM_TOTAL_ITEMS.map((it) => (
+        <span key={it.key} style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+          <span style={{ fontSize: 9, color: T.dim, fontWeight: 700 }}>{it.label}</span>
+          <span className="oswald" style={{ fontSize: 15, fontWeight: 800, color: T.text }}>{totals[it.key]}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function GoalLine({ ev, onEdit }) {
   return (
     <div style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, padding: "6px 10px", fontSize: 11 }}>
@@ -4266,6 +4333,7 @@ function SummaryModal({ players, stats, statsByHalf, goalEvents, disciplineEvent
             <div key={h} style={{ marginBottom: 22 }}>
               <SectionHeading title={halfLabel(h)} right={scoreOf(h)} />
               <StatsTable players={players} statsMap={statsByHalf[h] || {}} />
+              <TeamTotalsStrip players={players} statsMap={statsByHalf[h] || {}} />
               {goalsThisHalf.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
                   {goalsThisHalf.map((ev) => <GoalLine key={ev.id} ev={ev} onEdit={onEditGoal ? () => onEditGoal(ev) : null} />)}
@@ -4278,6 +4346,7 @@ function SummaryModal({ players, stats, statsByHalf, goalEvents, disciplineEvent
         <div>
           <SectionHeading title="Total del partido" right={`${totalFor}-${totalAgainst}`} accent={T.red} />
           <StatsTable players={players} statsMap={stats} />
+          <TeamTotalsStrip players={players} statsMap={stats} />
         </div>
 
         <DisciplineSection events={disciplineEvents} />
@@ -4490,13 +4559,24 @@ function ClockDial({ seconds, progress, running, half, size = 68 }) {
   );
 }
 
-function CounterChip({ label, value, color, onInc, onDec }) {
+// A la 4ª falta acumulada de la parte, un resaltado pequeño (aviso); a la
+// 5ª (y en adelante), uno grande con brillo -- porque la siguiente ya es
+// lanzamiento de 10M. Vale igual para el marcador propio que para el rival.
+function FoulsChip({ label, value, onInc, onDec }) {
+  const danger = value >= 5;
+  const warn = value === 4;
+  const bg = danger ? "rgba(230,57,70,0.22)" : warn ? "rgba(227,178,60,0.16)" : T.surface2;
+  const border = danger ? T.red : warn ? T.amber : T.line;
+  const numColor = danger ? T.red : warn ? T.amber : T.text;
+  const glow = danger ? "0 0 12px rgba(230,57,70,0.55)" : warn ? "0 0 7px rgba(227,178,60,0.4)" : "none";
+  const numSize = danger ? 20 : warn ? 18 : 15;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 10, padding: "8px 10px", flex: 1 }}>
-      <span style={{ fontSize: 11, color: T.dim, whiteSpace: "nowrap" }}>{label}</span>
+    <div style={{ display: "flex", alignItems: "center", gap: 6, background: bg, border: `1.5px solid ${border}`, borderRadius: 10, padding: "7px 9px", flex: 1, minWidth: 0, boxShadow: glow, transition: "background 0.2s ease, box-shadow 0.2s ease" }}>
+      <span style={{ fontSize: 9, fontWeight: 800, color: T.dim, textTransform: "uppercase", letterSpacing: 0.4, whiteSpace: "nowrap" }}>{label}</span>
       <button onClick={onDec} style={iconBtnSm}><Minus size={11} /></button>
-      <span className="oswald" style={{ fontSize: 15, fontWeight: 600, color, minWidth: 16, textAlign: "center" }}>{value}</span>
+      <span className="oswald" style={{ fontSize: numSize, fontWeight: 800, color: numColor, minWidth: 18, textAlign: "center", transition: "font-size 0.2s ease, color 0.2s ease" }}>{value}</span>
       <button onClick={onInc} style={iconBtnSm}><Plus size={11} /></button>
+      {danger && <span style={{ fontSize: 8, fontWeight: 800, color: T.red, whiteSpace: "nowrap" }}>10M</span>}
     </div>
   );
 }
