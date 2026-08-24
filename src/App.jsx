@@ -4562,21 +4562,31 @@ function ClockDial({ seconds, progress, running, half, size = 68 }) {
 // A la 4ª falta acumulada de la parte, un resaltado pequeño (aviso); a la
 // 5ª (y en adelante), uno grande con brillo -- porque la siguiente ya es
 // lanzamiento de 10M. Vale igual para el marcador propio que para el rival.
+// Mismo lenguaje visual que el marcador de goles (número oswald grande
+// flanqueado por Menos/Más, con el Más coloreado) porque es el gesto que ya
+// se usa a toda velocidad en pista -- práctico, sin reinventar nada nuevo.
+// Regla real: 4ª falta acumulada = aviso; desde la 5ª el rival ya tira
+// libre directo; desde la 6ª, encima, sin barrera (lanzamiento de 10M).
 function FoulsChip({ label, value, onInc, onDec }) {
   const danger = value >= 5;
+  const doublePenalty = value >= 6;
   const warn = value === 4;
-  const bg = danger ? "rgba(230,57,70,0.22)" : warn ? "rgba(227,178,60,0.16)" : T.surface2;
+  const bg = danger ? "rgba(230,57,70,0.2)" : warn ? "rgba(227,178,60,0.15)" : T.surface2;
   const border = danger ? T.red : warn ? T.amber : T.line;
   const numColor = danger ? T.red : warn ? T.amber : T.text;
-  const glow = danger ? "0 0 12px rgba(230,57,70,0.55)" : warn ? "0 0 7px rgba(227,178,60,0.4)" : "none";
-  const numSize = danger ? 20 : warn ? 18 : 15;
+  const glow = danger ? "0 0 14px rgba(230,57,70,0.5)" : warn ? "0 0 8px rgba(227,178,60,0.35)" : "none";
+  const plusBg = danger ? T.red : warn ? T.amber : T.negative;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, background: bg, border: `1.5px solid ${border}`, borderRadius: 10, padding: "7px 9px", flex: 1, minWidth: 0, boxShadow: glow, transition: "background 0.2s ease, box-shadow 0.2s ease" }}>
-      <span style={{ fontSize: 9, fontWeight: 800, color: T.dim, textTransform: "uppercase", letterSpacing: 0.4, whiteSpace: "nowrap" }}>{label}</span>
-      <button onClick={onDec} style={iconBtnSm}><Minus size={11} /></button>
-      <span className="oswald" style={{ fontSize: numSize, fontWeight: 800, color: numColor, minWidth: 18, textAlign: "center", transition: "font-size 0.2s ease, color 0.2s ease" }}>{value}</span>
-      <button onClick={onInc} style={iconBtnSm}><Plus size={11} /></button>
-      {danger && <span style={{ fontSize: 8, fontWeight: 800, color: T.red, whiteSpace: "nowrap" }}>10M</span>}
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, background: bg, border: `1.5px solid ${border}`, borderRadius: 10, padding: "6px 10px", flex: 1, minWidth: 0, boxShadow: glow, transition: "background 0.2s ease, box-shadow 0.2s ease" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+        <span style={{ fontSize: 9, fontWeight: 800, color: T.dim, textTransform: "uppercase", letterSpacing: 0.4, whiteSpace: "nowrap" }}>{label}</span>
+        {doublePenalty && <span style={{ fontSize: 9, fontWeight: 800, color: T.red, whiteSpace: "nowrap" }}>10M</span>}
+      </div>
+      <div className="oswald" style={{ fontSize: 22, fontWeight: 700, color: numColor, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "color 0.2s ease" }}>
+        <button onClick={onDec} style={iconBtnSm}><Minus size={11} /></button>
+        {value}
+        <button onClick={onInc} style={{ ...iconBtnSm, background: plusBg, color: "#0A0A0A" }}><Plus size={11} /></button>
+      </div>
     </div>
   );
 }
