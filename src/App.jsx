@@ -1893,6 +1893,8 @@ export default function App() {
   }, [commitTime, commitTrainingTime, saveDraftNow]);
 
   /* ---- instalación y actualizaciones de la PWA ---- */
+  const updateReadyRef = useRef(false);
+  useEffect(() => { updateReadyRef.current = updateReady; }, [updateReady]);
   useEffect(() => {
     const onPrompt = (e) => { e.preventDefault(); setInstallPrompt(e); };
     const onUpdate = () => setUpdateReady(true);
@@ -1918,6 +1920,18 @@ export default function App() {
   const applyUpdate = () => {
     if (running || trainingRunning) { showToast("Para el reloj antes de actualizar"); return; }
     saveDraftNow().finally(() => window.dispatchEvent(new CustomEvent("npa:apply-update")));
+  };
+
+  // La comprobación automática solo salta al volver a primer plano o cada
+  // hora (ver main.jsx) -- una app instalada que se queda abierta puede
+  // tardar en enterarse. Este botón fuerza la comprobación ahora mismo, sin
+  // esperar a nada.
+  const checkForUpdateNow = () => {
+    window.dispatchEvent(new CustomEvent("npa:check-update"));
+    showToast("Buscando actualización…");
+    setTimeout(() => {
+      if (!updateReadyRef.current) showToast("Ya tienes la última versión");
+    }, 3000);
   };
 
   // Keep our fullscreen state in sync if the person exits via Esc / browser chrome.
@@ -3037,6 +3051,7 @@ export default function App() {
             standalone={standalone}
             updateReady={updateReady}
             onApplyUpdate={applyUpdate}
+            onCheckUpdate={checkForUpdateNow}
             matchInProgress={matchInProgress}
             onResumeMatch={() => setView("partido")}
             onOpenBackup={() => setBackupOpen(true)}
@@ -4372,7 +4387,7 @@ function ScoreColumn({ labelNode, crest, score }) {
 function HomeView({
   team, onPickCrest, onReframeCrest, onRemoveCrest, matches, trainings, onNewMatch, onNewTraining,
   onGoRoster, onGoHistory, onExport, playerCount, onOpenTeams, teamCount,
-  canInstall, onInstall, standalone, updateReady, onApplyUpdate, matchInProgress, onResumeMatch, onOpenBackup,
+  canInstall, onInstall, standalone, updateReady, onApplyUpdate, onCheckUpdate, matchInProgress, onResumeMatch, onOpenBackup,
 }) {
   const wins = matches.filter((m) => m.teamGoals > m.rivalScore).length;
   const draws = matches.filter((m) => m.teamGoals === m.rivalScore).length;
@@ -4450,9 +4465,14 @@ function HomeView({
         </div>
       )}
 
-      <div style={{ maxWidth: 760, margin: "16px auto 0", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 11, color: T.dim, textAlign: "center" }}>
+      <div style={{ maxWidth: 760, margin: "16px auto 0", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 11, color: T.dim, textAlign: "center", flexWrap: "wrap" }}>
         <WifiOff size={12} />
         Funciona sin conexión · los datos se guardan solo en este dispositivo
+        {!updateReady && (
+          <button onClick={onCheckUpdate} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "none", border: "none", color: T.dim, textDecoration: "underline", fontSize: 11, cursor: "pointer", padding: 0 }}>
+            <RefreshCw size={11} /> Buscar actualizaciones
+          </button>
+        )}
       </div>
 
       {matches.length > 0 && (

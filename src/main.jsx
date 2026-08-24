@@ -38,6 +38,10 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("focus", checkForUpdate);
 setInterval(checkForUpdate, 60 * 60 * 1000);
 
+/* Botón "Buscar actualizaciones" en Inicio: fuerza la comprobación en el
+   momento, sin esperar a que la app vuelva a primer plano o pase una hora. */
+window.addEventListener("npa:check-update", checkForUpdate);
+
 /* Solo se recarga cuando la app lleva un rato en segundo plano y no hay nada
    en juego, para no perder datos de un partido en curso. */
 window.addEventListener("npa:apply-update", () => {
