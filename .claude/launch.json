@@ -42,6 +42,18 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "C:\\Users\\impab\\Documents\\noia-pizarra", "run", "dev", "--", "--port", "5185"],
       "port": 5185
+    },
+    {
+      "name": "noia-campogramas-build",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\Users\\impab\\Documents\\noia-campogramas", "run", "preview", "--", "--port", "4175"],
+      "port": 4175
+    },
+    {
+      "name": "noia-longomatch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\Users\\impab\\Documents\\noia-longomatch", "run", "dev", "--", "--port", "5186"],
+      "port": 5186
     }
   ]
 }

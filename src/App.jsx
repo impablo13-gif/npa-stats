@@ -608,6 +608,43 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
     return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:#eee;display:flex;align-items:center;justify-content:center;font-size:${Math.round(size * 0.36)}px;font-weight:700;color:#888;border:1px solid #ddd;flex-shrink:0;">${esc(row.number)}</div>`;
   };
 
+  // Donut de tarta a base de arcos <path> -- NO de <circle> con
+  // stroke-dasharray/stroke-dashoffset/transform=rotate(...), que es como se
+  // dibujaba antes: html2canvas rasteriza mal esa combinación y el donut
+  // salía como un hilo casi invisible en el PDF exportado (se veía bien en
+  // pantalla, donde SÍ es un SVG válido, pero no en la captura).
+  const donutSvg = (segments, size = 120) => {
+    const R = 42, cx = 55, cy = 55, sw = 15;
+    const total = segments.reduce((s, x) => s + (x.value || 0), 0);
+    const active = segments.filter((x) => (x.value || 0) > 0);
+    if (!total || !active.length) return "";
+    const toXY = (angleDeg) => {
+      const a = ((angleDeg - 90) * Math.PI) / 180;
+      return [(cx + R * Math.cos(a)).toFixed(2), (cy + R * Math.sin(a)).toFixed(2)];
+    };
+    let startAngle = 0;
+    const pathsHtml = active.map((s) => {
+      const sweep = (s.value / total) * 360;
+      const endAngle = startAngle + sweep;
+      let d;
+      if (sweep >= 359.99) {
+        // Un solo segmento al 100%: un arco de 360º es degenerado en SVG
+        // (el punto de inicio y fin coinciden), así que se traza en dos
+        // medias vueltas.
+        const [x1, y1] = toXY(startAngle);
+        const [xm, ym] = toXY(startAngle + 180);
+        d = `M ${x1} ${y1} A ${R} ${R} 0 1 1 ${xm} ${ym} A ${R} ${R} 0 1 1 ${x1} ${y1}`;
+      } else {
+        const [x1, y1] = toXY(startAngle);
+        const [x2, y2] = toXY(endAngle);
+        d = `M ${x1} ${y1} A ${R} ${R} 0 ${sweep > 180 ? 1 : 0} 1 ${x2} ${y2}`;
+      }
+      startAngle = endAngle;
+      return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${sw}" />`;
+    }).join("");
+    return `<svg viewBox="0 0 110 110" style="width:${size}px; height:${size}px; display:block; margin:0 auto;">${pathsHtml}</svg>`;
+  };
+
   const sectionTitle = (icon, text) => `
     <div data-pdf-block="true" style="display:flex; align-items:center; gap:7px; font-size:13.5px; font-weight:800; color:#C0202E; text-transform:uppercase; letter-spacing:0.5px; margin:26px 0 10px; padding-bottom:7px; border-bottom:2px solid #f0f1f3;">
       <span style="font-size:15px;">${icon}</span><span>${esc(text)}</span>
@@ -640,7 +677,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
           <div style="line-height:1.5; font-size:8px; color:#8a9099;">${chips}</div>
         </div>`;
     }).join("");
-    return `<div style="display:flex; align-items:center; gap:12px; padding:9px 12px; border-bottom:1px solid #f0f1f3; break-inside:avoid;">
+    return `<div data-pdf-block="true" style="display:flex; align-items:center; gap:12px; padding:9px 12px; border-bottom:1px solid #f0f1f3; break-inside:avoid;">
         ${avatarImg(row, 34)}
         <div style="min-width:100px;">
           <div style="font-size:12px; font-weight:700;">${esc(row.name)}</div>
@@ -738,16 +775,10 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
     const counts = new Map();
     forGoals.forEach((g) => counts.set(g.phase, (counts.get(g.phase) || 0) + 1));
     const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
-    const R = 42, cx = 55, cy = 55, sw = 15, circ = 2 * Math.PI * R;
-    let offset = 0;
-    const segsHtml = entries.map(([phase, count]) => {
+    const segsHtml = donutSvg(entries.map(([phase, count]) => {
       const def = GOAL_PHASES.find((p) => p.key === phase);
-      const color = def ? def.color : "#888";
-      const dash = (count / total) * circ;
-      const el = `<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-dasharray="${dash} ${circ - dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})" />`;
-      offset += dash;
-      return el;
-    }).join("");
+      return { value: count, color: def ? def.color : "#888" };
+    }), 100);
     const legendHtml = entries.map(([phase, count]) => {
       const def = GOAL_PHASES.find((p) => p.key === phase);
       const color = def ? def.color : "#888";
@@ -758,7 +789,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
           <b>${count}</b>
         </div>`;
     }).join("");
-    return `<svg viewBox="0 0 110 110" style="width:100px; height:100px; display:block; margin:0 auto;">${segsHtml}</svg>
+    return `${segsHtml}
       <div style="display:flex; flex-direction:column; gap:4px; margin-top:8px;">${legendHtml}</div>`;
   })();
 
@@ -959,7 +990,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const shotsByPlayerHtml = shooters.map((p) => {
     const total = (p.shotsOn || 0) + (p.shotsOff || 0) + (p.shotsPost || 0) + (p.goals || 0);
     const badge = (label, val, color) => val ? `<span style="color:${color}; font-weight:700; margin-right:6px;">${label}×${val}</span>` : "";
-    return `<div style="display:flex; align-items:center; gap:8px; padding:5px 0; break-inside:avoid;">
+    return `<div data-pdf-block="true" style="display:flex; align-items:center; gap:8px; padding:5px 0; break-inside:avoid;">
         ${avatarImg(p, 26)}
         <div style="flex:1; min-width:0;">
           <div style="font-size:11px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(p.name)}</div>
@@ -977,15 +1008,13 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
 
   const donutHtml = (() => {
     if (!totShots) return `<div style="font-size:10px; color:#aaa; text-align:center;">Sin tiros registrados.</div>`;
-    const R = 42, cx = 55, cy = 55, sw = 15, circ = 2 * Math.PI * R;
-    let offset = 0;
-    const seg = (value, color) => {
-      const dash = (value / totShots) * circ;
-      const el = `<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-dasharray="${dash} ${circ - dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})" />`;
-      offset += dash;
-      return el;
-    };
-    return `<svg viewBox="0 0 110 110" style="width:120px; height:120px; display:block; margin:0 auto;">${seg(totShotsOn, PAL.blue)}${seg(totShotsOff, PAL.orange)}${seg(totShotsPost, PAL.amber)}${seg(totGoals, PAL.favor)}</svg>
+    const segsHtml = donutSvg([
+      { value: totShotsOn, color: PAL.blue },
+      { value: totShotsOff, color: PAL.orange },
+      { value: totShotsPost, color: PAL.amber },
+      { value: totGoals, color: PAL.favor },
+    ], 120);
+    return `${segsHtml}
       <div style="display:flex; flex-direction:column; gap:4px; font-size:9px; margin-top:10px;">
         <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${PAL.blue};"></span> A puerta: <b>${totShotsOn}</b> (${Math.round((totShotsOn / totShots) * 100)}%)</span>
         <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${PAL.orange};"></span> Fuera: <b>${totShotsOff}</b> (${Math.round((totShotsOff / totShots) * 100)}%)</span>
@@ -1052,15 +1081,11 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const recTurnDonutHtml = (() => {
     const total = totalRecoveries + totalTurnovers;
     if (!total) return `<div style="font-size:10px; color:#aaa; text-align:center;">Sin registros.</div>`;
-    const R = 42, cx = 55, cy = 55, sw = 15, circ = 2 * Math.PI * R;
-    let offset = 0;
-    const seg = (value, color) => {
-      const dash = (value / total) * circ;
-      const el = `<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-dasharray="${dash} ${circ - dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})" />`;
-      offset += dash;
-      return el;
-    };
-    return `<svg viewBox="0 0 110 110" style="width:120px; height:120px; display:block; margin:0 auto;">${seg(totalTurnovers, PAL.contra)}${seg(totalRecoveries, PAL.favor)}</svg>
+    const segsHtml = donutSvg([
+      { value: totalTurnovers, color: PAL.contra },
+      { value: totalRecoveries, color: PAL.favor },
+    ], 120);
+    return `${segsHtml}
       <div style="display:flex; flex-direction:column; gap:4px; font-size:9px; margin-top:10px;">
         <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${PAL.favor};"></span> Recuperaciones: <b>${totalRecoveries}</b> (${Math.round((totalRecoveries / total) * 100)}%)</span>
         <span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${PAL.contra};"></span> Pérdidas: <b>${totalTurnovers}</b> (${Math.round((totalTurnovers / total) * 100)}%)</span>
@@ -1073,7 +1098,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
     <div style="display:flex; font-size:8px; font-weight:800; color:#9aa0a6; text-transform:uppercase; padding:0 0 6px; border-bottom:1px solid #eef0f2; margin-bottom:4px;">
       <span style="flex:1;">Jugador</span><span style="width:34px; text-align:center; color:${PAL.favor};">Rec</span><span style="width:34px; text-align:center; color:${PAL.contra};">Pér</span>
     </div>
-    ${recPerRows.map((p) => `<div style="display:flex; align-items:center; gap:7px; padding:4px 0; font-size:10px;">
+    ${recPerRows.map((p) => `<div data-pdf-block="true" style="display:flex; align-items:center; gap:7px; padding:4px 0; font-size:10px;">
         ${avatarImg(p, 20)}<span style="flex:1; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(p.name)}</span>
         <span style="width:34px; text-align:center; font-weight:800; color:${PAL.favor};">${p.recoveries || 0}</span>
         <span style="width:34px; text-align:center; font-weight:800; color:${PAL.contra};">${p.turnovers || 0}</span>
@@ -1096,7 +1121,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const foulsAndCardsRows = [...discByPlayer.values()].filter((d) => d.fouls || d.foulsReceived || d.yellowHalves.length || d.redHalves.length)
     .sort((a, b) => (b.fouls + b.foulsReceived + b.yellowHalves.length + b.redHalves.length) - (a.fouls + a.foulsReceived + a.yellowHalves.length + a.redHalves.length));
   const foulsAndCardsHtml = !foulsAndCardsRows.length ? `<div style="font-size:10px; color:#aaa;">Sin faltas ni tarjetas.</div>` : foulsAndCardsRows.map((d) => `
-      <div style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:10px;">
+      <div data-pdf-block="true" style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:10px;">
         ${avatarImg(d, 22)}
         <span style="flex:1; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(d.name)}</span>
         ${d.fouls ? `<span style="color:${PAL.contra}; font-weight:700;">↩ ${d.fouls}</span>` : ""}
@@ -1293,10 +1318,16 @@ async function exportReportToPdf(html, fileName) {
       const idealEnd = Math.min(renderedPx + idealSliceHeightPx, fullCanvas.height);
       let cut = idealEnd;
       if (cut < fullCanvas.height) {
-        // El mejor corte seguro que quepa en esta página -- si un solo
-        // bloque es más alto que una página entera no hay corte seguro
-        // posible, y se cae al corte "ideal" sin más remedio.
-        const candidates = blockTops.filter((y) => y > renderedPx + idealSliceHeightPx * 0.4 && y <= idealEnd);
+        // El mejor corte seguro que quepa en esta página: el último bloque
+        // que arranca pasado el 40% de la página, para no desperdiciar
+        // demasiado espacio en blanco. Si ninguno cae en esa franja (una
+        // sección corta seguida de un bloque grande que no entra), se
+        // relaja a "cualquier bloque que quepa", aunque deje más margen en
+        // blanco -- la alternativa es el corte "ideal" a ciegas, que puede
+        // caer en mitad de un título o de una fila. Solo si ni eso hay
+        // (un único bloque más alto que la página entera) se cae a él.
+        const preferred = blockTops.filter((y) => y > renderedPx + idealSliceHeightPx * 0.4 && y <= idealEnd);
+        const candidates = preferred.length ? preferred : blockTops.filter((y) => y > renderedPx && y <= idealEnd);
         if (candidates.length) cut = candidates[candidates.length - 1];
       }
       const sliceHeight = Math.max(1, cut - renderedPx);
