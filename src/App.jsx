@@ -608,41 +608,36 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
     return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:#eee;display:flex;align-items:center;justify-content:center;font-size:${Math.round(size * 0.36)}px;font-weight:700;color:#888;border:1px solid #ddd;flex-shrink:0;">${esc(row.number)}</div>`;
   };
 
-  // Donut de tarta a base de arcos <path> -- NO de <circle> con
-  // stroke-dasharray/stroke-dashoffset/transform=rotate(...), que es como se
-  // dibujaba antes: html2canvas rasteriza mal esa combinación y el donut
-  // salía como un hilo casi invisible en el PDF exportado (se veía bien en
-  // pantalla, donde SÍ es un SVG válido, pero no en la captura).
-  const donutSvg = (segments, size = 120) => {
-    const R = 42, cx = 55, cy = 55, sw = 15;
+  // Donut de tarta rasterizado con <canvas> y embebido como <img> -- NO como
+  // SVG (ni <circle> con stroke-dasharray, ni <path> con arcos): html2canvas
+  // se ve bien en pantalla con cualquiera de las dos, pero al capturar la
+  // página completa para el PDF, con muchos <path>/<circle> superpuestos en
+  // el mismo radio, descarta en silencio alguno de los trazos -- el donut
+  // salía como un anillo a medias o un hilo casi invisible. Un <img> ya
+  // rasterizado no depende de que html2canvas interprete SVG: solo compone
+  // los píxeles que ya existen.
+  const donutImg = (segments, size = 120) => {
     const total = segments.reduce((s, x) => s + (x.value || 0), 0);
     const active = segments.filter((x) => (x.value || 0) > 0);
     if (!total || !active.length) return "";
-    const toXY = (angleDeg) => {
-      const a = ((angleDeg - 90) * Math.PI) / 180;
-      return [(cx + R * Math.cos(a)).toFixed(2), (cy + R * Math.sin(a)).toFixed(2)];
-    };
-    let startAngle = 0;
-    const pathsHtml = active.map((s) => {
-      const sweep = (s.value / total) * 360;
-      const endAngle = startAngle + sweep;
-      let d;
-      if (sweep >= 359.99) {
-        // Un solo segmento al 100%: un arco de 360º es degenerado en SVG
-        // (el punto de inicio y fin coinciden), así que se traza en dos
-        // medias vueltas.
-        const [x1, y1] = toXY(startAngle);
-        const [xm, ym] = toXY(startAngle + 180);
-        d = `M ${x1} ${y1} A ${R} ${R} 0 1 1 ${xm} ${ym} A ${R} ${R} 0 1 1 ${x1} ${y1}`;
-      } else {
-        const [x1, y1] = toXY(startAngle);
-        const [x2, y2] = toXY(endAngle);
-        d = `M ${x1} ${y1} A ${R} ${R} 0 ${sweep > 180 ? 1 : 0} 1 ${x2} ${y2}`;
-      }
-      startAngle = endAngle;
-      return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${sw}" />`;
-    }).join("");
-    return `<svg viewBox="0 0 110 110" style="width:${size}px; height:${size}px; display:block; margin:0 auto;">${pathsHtml}</svg>`;
+    const dpr = 3; // se dibuja a 3x y se reduce por CSS, para que no se vea pixelado
+    const canvas = document.createElement("canvas");
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    const ctx = canvas.getContext("2d");
+    const cx = (size * dpr) / 2, cy = (size * dpr) / 2;
+    const R = (42 / 110) * size * dpr, sw = (15 / 110) * size * dpr;
+    ctx.lineWidth = sw;
+    let angle = -Math.PI / 2; // 12 en punto, igual que el diseño anterior
+    active.forEach((s) => {
+      const sweep = (s.value / total) * 2 * Math.PI;
+      ctx.beginPath();
+      ctx.strokeStyle = s.color;
+      ctx.arc(cx, cy, R, angle, angle + sweep);
+      ctx.stroke();
+      angle += sweep;
+    });
+    return `<img src="${canvas.toDataURL("image/png")}" style="width:${size}px; height:${size}px; display:block; margin:0 auto;" />`;
   };
 
   const sectionTitle = (icon, text) => `
@@ -775,7 +770,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
     const counts = new Map();
     forGoals.forEach((g) => counts.set(g.phase, (counts.get(g.phase) || 0) + 1));
     const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
-    const segsHtml = donutSvg(entries.map(([phase, count]) => {
+    const segsHtml = donutImg(entries.map(([phase, count]) => {
       const def = GOAL_PHASES.find((p) => p.key === phase);
       return { value: count, color: def ? def.color : "#888" };
     }), 100);
@@ -1008,7 +1003,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
 
   const donutHtml = (() => {
     if (!totShots) return `<div style="font-size:10px; color:#aaa; text-align:center;">Sin tiros registrados.</div>`;
-    const segsHtml = donutSvg([
+    const segsHtml = donutImg([
       { value: totShotsOn, color: PAL.blue },
       { value: totShotsOff, color: PAL.orange },
       { value: totShotsPost, color: PAL.amber },
@@ -1081,7 +1076,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const recTurnDonutHtml = (() => {
     const total = totalRecoveries + totalTurnovers;
     if (!total) return `<div style="font-size:10px; color:#aaa; text-align:center;">Sin registros.</div>`;
-    const segsHtml = donutSvg([
+    const segsHtml = donutImg([
       { value: totalTurnovers, color: PAL.contra },
       { value: totalRecoveries, color: PAL.favor },
     ], 120);
