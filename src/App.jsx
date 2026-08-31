@@ -1346,6 +1346,47 @@ async function exportReportToPdf(html, fileName) {
   }
 }
 
+// Datos en crudo del partido para llevarlos a Segundo Cerebro (noia-planificador)
+// sin pasar por el PDF -- el PDF es una imagen rasterizada (sin texto real ni
+// datos embebidos), así que un archivo aparte con los mismos números que ya
+// calculamos aquí (goles, asistencias, tarjetas, minutos, convocatoria) es la
+// única vía fiable para que esa app los lea automáticamente. Formato y campos
+// fijados por lo que ya espera syncNpaMatchExport en noia-planificador/src/npaSync.js
+// -- no añadir ni renombrar campos ahí sin tocar los dos lados a la vez.
+function buildMatchJsonPayload(match, teamName) {
+  return {
+    formato: "npa-stats-partido",
+    version: 1,
+    equipo: teamName || "",
+    partido: {
+      date: match.date,
+      rivalName: match.rivalName || "",
+      teamGoals: match.teamGoals ?? 0,
+      rivalScore: match.rivalScore ?? 0,
+      halfLength: match.halfLength,
+      venue: match.venue || "",
+      startTime: match.startTime || "",
+      players: match.players || [],
+      goalEvents: match.goalEvents || [],
+      convocados: match.convocados || null,
+      reportGeneratedAt: match.reportGeneratedAt || new Date().toISOString(),
+    },
+  };
+}
+
+function downloadMatchDataJson(match, teamName, fileName) {
+  const payload = buildMatchJsonPayload(match, teamName);
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // Muestra el informe a pantalla completa DENTRO de la propia app -- una PWA
 // instalada (sin barra de pestañas) no puede fiarse de window.open(): en
 // modo standalone, la mayoría de navegadores lo ignoran o lo bloquean sin
@@ -1354,7 +1395,7 @@ async function exportReportToPdf(html, fileName) {
 // en la tablet), y "Exportar a PDF" descarga el archivo directamente --
 // separado a propósito, porque en varias tablets el diálogo de impresión
 // no deja guardar como PDF de forma sencilla.
-function MatchReportView({ html, title, fileName, onExportError, onClose }) {
+function MatchReportView({ html, title, fileName, matchData, teamName, onExportError, onClose }) {
   const [exporting, setExporting] = useState(false);
   const handleExportPdf = async () => {
     if (exporting) return;
@@ -1362,6 +1403,10 @@ function MatchReportView({ html, title, fileName, onExportError, onClose }) {
     try { await exportReportToPdf(html, fileName || "informe.pdf"); }
     catch (e) { if (onExportError) onExportError(); }
     setExporting(false);
+  };
+  const handleDownloadJson = () => {
+    const jsonFileName = (fileName || "informe.pdf").replace(/\.pdf$/i, "") + "_datos.json";
+    downloadMatchDataJson(matchData, teamName, jsonFileName);
   };
   return (
     <div className="match-report-view" style={{ position: "fixed", inset: 0, zIndex: 300, background: "#f2f2f2", overflowY: "auto" }}>
@@ -1382,6 +1427,9 @@ function MatchReportView({ html, title, fileName, onExportError, onClose }) {
         <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
         <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
           <button onClick={handleExportPdf} disabled={exporting} style={{ background: "#C0202E", color: "#fff", border: "none", borderRadius: 6, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: exporting ? "default" : "pointer", opacity: exporting ? 0.7 : 1 }}>{exporting ? "Generando…" : "Exportar a PDF"}</button>
+          {matchData && (
+            <button onClick={handleDownloadJson} title="Datos en crudo del partido, para subirlos a Segundo Cerebro" style={{ background: "transparent", color: "#fff", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 6, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Descargar datos (JSON)</button>
+          )}
           <button onClick={() => window.print()} style={{ background: "transparent", color: "#fff", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 6, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Imprimir</button>
           <button onClick={onClose} style={{ background: "transparent", color: "#fff", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 6, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Cerrar</button>
         </div>
@@ -2095,8 +2143,9 @@ export default function App() {
     const updated = { ...reportMetaFor, ...patch };
     const html = buildMatchReportHtml(updated, activeTeam.name, players, activeTeam.crest);
     const fileName = `${sanitizeFileName(activeTeam.name) || "equipo"}_${dateLabelOf(updated.date)}_vs_${sanitizeFileName(updated.rivalName) || "rival"}_informe.pdf`;
-    setViewingReport({ html, title: matchReportTitle(updated, activeTeam.name), fileName });
-    const toSave = { ...updated, reportHtml: html, reportGeneratedAt: new Date().toISOString() };
+    const reportGeneratedAt = new Date().toISOString();
+    setViewingReport({ html, title: matchReportTitle(updated, activeTeam.name), fileName, matchData: { ...updated, reportGeneratedAt }, teamName: activeTeam.name });
+    const toSave = { ...updated, reportHtml: html, reportGeneratedAt };
     storage.set(`matches:${activeTeamId}:${updated.date}`, JSON.stringify(toSave)).catch(() => {});
     loadHistoryFor(activeTeamId);
     setReportMetaFor(null);
@@ -3436,7 +3485,7 @@ export default function App() {
       )}
 
       {viewingReport && (
-        <MatchReportView html={viewingReport.html} title={viewingReport.title} fileName={viewingReport.fileName} onExportError={() => showToast("No se pudo exportar el PDF — prueba con Imprimir")} onClose={() => setViewingReport(null)} />
+        <MatchReportView html={viewingReport.html} title={viewingReport.title} fileName={viewingReport.fileName} matchData={viewingReport.matchData} teamName={viewingReport.teamName} onExportError={() => showToast("No se pudo exportar el PDF — prueba con Imprimir")} onClose={() => setViewingReport(null)} />
       )}
 
       {confirmEndTraining && (
