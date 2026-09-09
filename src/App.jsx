@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import * as XLSX from "xlsx";
+import * as XLSXStyle from "xlsx-js-style";
 import {
   Play, Pause, RotateCcw, Plus, Minus, X, Save,
   Shirt, ChevronRight, Trash2, History, ClipboardList,
@@ -196,6 +197,21 @@ const GOAL_PHASES = [
   { key: "En propia", label: "En propia", group: 7, color: "#6b7280" },
 ];
 
+// GOAL_PHASES agrupadas por su "group" -- la base del marcador de temporada
+// al estilo del informe de Santoro: cada bloque de fases afines comparte una
+// franja de color (la de su primera fase) en vez de que cada una lleve la suya,
+// para que la cabecera de cada categoría se lea de un solo golpe de vista.
+const GOAL_PHASE_GROUPS = (() => {
+  const map = new Map();
+  GOAL_PHASES.forEach((p) => {
+    if (!map.has(p.group)) map.set(p.group, { id: p.group, color: p.color, phases: [] });
+    map.get(p.group).phases.push(p);
+  });
+  return [...map.values()]
+    .sort((a, b) => a.id - b.id)
+    .map((g) => ({ ...g, label: g.phases.map((p) => p.label).join(" / ") }));
+})();
+
 // Pérdidas, recuperaciones y tiros llevan zona del campo — campo propio abajo
 // (fila 1, defensiva), campo rival arriba (fila 3, ataque), como se ve el
 // campo de pie en la banda. 3x3: da granularidad real sin volverse un mapa de
@@ -300,6 +316,34 @@ const goalRowsOf = (match) => (match.goalEvents || []).map((ev) => ({
   Fase: ev.phase,
   "Jugadores en pista": (ev.onCourt || []).map((p) => `#${p.number} ${p.name}`).join(", "),
 }));
+
+// Una fila por partido con el recuento de goles por fase, a favor y en
+// contra -- la base del marcador de temporada al estilo Santoro, con la
+// diferencia de que aquí cada fila es un partido propio y no un equipo rival
+// de liga, que es la unidad que tiene sentido cuando solo se seguimos a un
+// equipo. Partidos sin ningún gol registrado con fase quedan todos a 0, no
+// se descartan, para que el partido siga contando en el marcador.
+function seasonGoalStatsRows(matches) {
+  return [...matches]
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .map((m) => {
+      const forCounts = {}, againstCounts = {};
+      GOAL_PHASES.forEach((p) => { forCounts[p.key] = 0; againstCounts[p.key] = 0; });
+      (m.goalEvents || []).forEach((ev) => {
+        const bucket = ev.type === "for" ? forCounts : againstCounts;
+        if (bucket[ev.phase] === undefined) bucket[ev.phase] = 0;
+        bucket[ev.phase] += 1;
+      });
+      return { date: m.date, rivalName: m.rivalName, teamGoals: m.teamGoals, rivalScore: m.rivalScore, forCounts, againstCounts };
+    });
+}
+
+const sumSeasonGoalCounts = (rows, side) => {
+  const totals = {};
+  GOAL_PHASES.forEach((p) => { totals[p.key] = 0; });
+  rows.forEach((r) => GOAL_PHASES.forEach((p) => { totals[p.key] += r[side][p.key] || 0; }));
+  return totals;
+};
 
 const disciplineRowsOf = (match) => (match.disciplineEvents || []).map((ev) => ({
   Parte: ev.half,
@@ -568,6 +612,129 @@ function exportSingleMatchToExcel(match, teamName) {
   const dateLabel = dateLabelOf(match.date);
   const rivalLabel = sanitizeFileName(match.rivalName) || "rival";
   XLSX.writeFile(wb, `${sanitizeFileName(teamName) || "equipo"}_${dateLabel}_vs_${rivalLabel}.xlsx`);
+}
+
+/* ---- Excel del marcador de goles por fase, al estilo del informe de
+   Santoro: tabla coloreada por categoría con GOLES A FAVOR y EN CONTRA en
+   bloques espejados, fila de TOTALES y una fila por partido. Usa
+   "xlsx-js-style" (no el "xlsx" de arriba) porque la edición community de
+   SheetJS descarta los colores de celda al escribir el archivo. ---- */
+const hexToRgb = (hex) => {
+  const h = hex.replace("#", "");
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+};
+// Aclara un color mezclándolo hacia blanco, para las sub-columnas de cada
+// categoría: mismo tono que la cabecera de su grupo, pero legible con texto oscuro.
+const tintHex = (hex, amount) => {
+  const [r, g, b] = hexToRgb(hex);
+  const mix = (c) => Math.round(c + (255 - c) * amount).toString(16).padStart(2, "0");
+  return `${mix(r)}${mix(g)}${mix(b)}`.toUpperCase();
+};
+const rgbNoHash = (hex) => hex.replace("#", "").toUpperCase();
+const XLSX_THIN_BORDER = { top: { style: "thin", color: { rgb: "D9D9D9" } }, bottom: { style: "thin", color: { rgb: "D9D9D9" } }, left: { style: "thin", color: { rgb: "D9D9D9" } }, right: { style: "thin", color: { rgb: "D9D9D9" } } };
+const xlsxFill = (hex) => ({ patternType: "solid", fgColor: { rgb: rgbNoHash(hex) } });
+const xlsxCenter = { horizontal: "center", vertical: "center", wrapText: true };
+
+function buildSeasonGoalStatsSheet(rows, teamName) {
+  const groups = GOAL_PHASE_GROUPS;
+  const blocks = [
+    { key: "forCounts", label: "GOLES A FAVOR" },
+    { key: "againstCounts", label: "GOLES EN CONTRA" },
+  ];
+  const FIXED = ["Fecha", "Rival", "Resultado"];
+  const phasesPerBlock = groups.reduce((n, g) => n + g.phases.length, 0);
+  const totalCols = FIXED.length + blocks.length * (phasesPerBlock + 1); // +1 = columna "Total" de cada bloque
+  const dataStartRow = 3; // filas 0-2 son las tres cabeceras
+  const totalRows = dataStartRow + 1 + rows.length; // +1 = fila TOTALES
+
+  const aoa = Array.from({ length: totalRows }, () => Array(totalCols).fill(""));
+  const merges = [];
+  const styles = {};
+  const setStyle = (r, c, s) => { styles[`${r}-${c}`] = s; };
+
+  FIXED.forEach((label, i) => {
+    aoa[0][i] = label;
+    merges.push({ s: { r: 0, c: i }, e: { r: 2, c: i } });
+    setStyle(0, i, { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: xlsxFill("#15181c"), alignment: xlsxCenter, border: XLSX_THIN_BORDER });
+  });
+
+  let col = FIXED.length;
+  const colMeta = [];
+  blocks.forEach((block) => {
+    const blockStart = col;
+    groups.forEach((g) => {
+      const groupStart = col;
+      g.phases.forEach((p) => {
+        aoa[2][col] = p.label;
+        setStyle(2, col, { font: { bold: true, sz: 9 }, fill: xlsxFill(`#${tintHex(g.color, 0.72)}`), alignment: xlsxCenter, border: XLSX_THIN_BORDER });
+        colMeta[col] = { block: block.key, phaseKey: p.key };
+        col++;
+      });
+      aoa[1][groupStart] = g.label;
+      setStyle(1, groupStart, { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: xlsxFill(g.color), alignment: xlsxCenter, border: XLSX_THIN_BORDER });
+      if (col - 1 > groupStart) merges.push({ s: { r: 1, c: groupStart }, e: { r: 1, c: col - 1 } });
+    });
+    aoa[0][blockStart] = block.label;
+    setStyle(0, blockStart, { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: xlsxFill("#3a3a3a"), alignment: xlsxCenter, border: XLSX_THIN_BORDER });
+    merges.push({ s: { r: 0, c: blockStart }, e: { r: 0, c: col - 1 } });
+
+    aoa[0][col] = "Total";
+    merges.push({ s: { r: 0, c: col }, e: { r: 2, c: col } });
+    setStyle(0, col, { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: xlsxFill("#3a3a3a"), alignment: xlsxCenter, border: XLSX_THIN_BORDER });
+    colMeta[col] = { block: block.key, isTotal: true };
+    col++;
+  });
+
+  aoa[dataStartRow][0] = "TOTALES";
+  merges.push({ s: { r: dataStartRow, c: 0 }, e: { r: dataStartRow, c: 2 } });
+  setStyle(dataStartRow, 0, { font: { bold: true }, fill: xlsxFill("#FDE9A8"), border: XLSX_THIN_BORDER });
+
+  const totalsByBlock = { forCounts: sumSeasonGoalCounts(rows, "forCounts"), againstCounts: sumSeasonGoalCounts(rows, "againstCounts") };
+  for (let c = FIXED.length; c < totalCols; c++) {
+    const meta = colMeta[c];
+    const value = meta.isTotal
+      ? Object.values(totalsByBlock[meta.block]).reduce((a, b) => a + b, 0)
+      : (totalsByBlock[meta.block][meta.phaseKey] || 0);
+    aoa[dataStartRow][c] = value;
+    setStyle(dataStartRow, c, { font: { bold: true }, fill: xlsxFill("#FDE9A8"), alignment: xlsxCenter, border: XLSX_THIN_BORDER });
+  }
+
+  rows.forEach((row, i) => {
+    const r = dataStartRow + 1 + i;
+    aoa[r][0] = new Date(row.date).toLocaleDateString("es-ES");
+    aoa[r][1] = row.rivalName || "";
+    aoa[r][2] = `${row.teamGoals ?? ""}-${row.rivalScore ?? ""}`;
+    setStyle(r, 0, { border: XLSX_THIN_BORDER });
+    setStyle(r, 1, { border: XLSX_THIN_BORDER });
+    setStyle(r, 2, { alignment: xlsxCenter, border: XLSX_THIN_BORDER });
+    for (let c = FIXED.length; c < totalCols; c++) {
+      const meta = colMeta[c];
+      const value = meta.isTotal
+        ? Object.values(row[meta.block]).reduce((a, b) => a + b, 0)
+        : (row[meta.block][meta.phaseKey] || 0);
+      aoa[r][c] = value;
+      setStyle(r, c, { alignment: xlsxCenter, border: XLSX_THIN_BORDER, font: meta.isTotal ? { bold: true } : undefined });
+    }
+  });
+
+  const ws = XLSXStyle.utils.aoa_to_sheet(aoa);
+  ws["!merges"] = merges;
+  Object.entries(styles).forEach(([key, s]) => {
+    const [r, c] = key.split("-").map(Number);
+    const addr = XLSXStyle.utils.encode_cell({ r, c });
+    if (ws[addr]) ws[addr].s = s;
+  });
+  ws["!cols"] = Array.from({ length: totalCols }, (_, c) => ({ wch: c < FIXED.length ? 14 : 9 }));
+  ws["!rows"] = [{ hpt: 20 }, { hpt: 20 }, { hpt: 26 }];
+  return ws;
+}
+
+function exportSeasonGoalStatsToExcel(matches, teamName) {
+  const rows = seasonGoalStatsRows(matches);
+  if (!rows.length) return;
+  const wb = XLSXStyle.utils.book_new();
+  XLSXStyle.utils.book_append_sheet(wb, buildSeasonGoalStatsSheet(rows, teamName), "Fases de gol");
+  XLSXStyle.writeFile(wb, `${sanitizeFileName(teamName) || "equipo"}_fases_de_gol_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 const POS_GROUP_COLOR = { POR: "#E0A030", CIE: "#2E9BD6", ALA: "#16B889", PIV: "#E2574C" };
@@ -4945,9 +5112,10 @@ function HistoryView({ matches, trainings, teamName, teamCrest, rosterPlayers, s
         )}
       </div>
 
-      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
         <SubTabBtn active={subTab === "partidos"} onClick={() => onSubTabChange("partidos")} label={`Partidos (${matches.length})`} />
         <SubTabBtn active={subTab === "entrenamientos"} onClick={() => onSubTabChange("entrenamientos")} label={`Entrenamientos (${trainings.length})`} />
+        <SubTabBtn active={subTab === "estadisticas"} onClick={() => onSubTabChange("estadisticas")} label="Fases de gol" />
       </div>
 
       {subTab === "partidos" && (
@@ -5013,6 +5181,190 @@ function HistoryView({ matches, trainings, teamName, teamCrest, rosterPlayers, s
           </div>
         )
       )}
+
+      {subTab === "estadisticas" && <SeasonGoalStatsView matches={matches} teamName={teamName} />}
+    </div>
+  );
+}
+
+/* Donut sencillo en SVG (sin canvas: esto vive en pantalla, no en un PDF
+   rasterizado) para ver de un vistazo qué categoría pesa más en el reparto. */
+function StatDonut({ segments, size = 128, strokeWidth = 20 }) {
+  const active = segments.filter((s) => s.value > 0);
+  const total = active.reduce((s, x) => s + x.value, 0);
+  if (!total) return <div style={{ fontSize: 11, color: "#aaa", textAlign: "center", padding: 20 }}>Sin goles registrados.</div>;
+  const r = (size - strokeWidth) / 2;
+  const c = size / 2;
+  const circumference = 2 * Math.PI * r;
+  let offset = 0;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <circle cx={c} cy={c} r={r} fill="none" stroke="#eef0f2" strokeWidth={strokeWidth} />
+      {active.map((s, i) => {
+        const dash = (s.value / total) * circumference;
+        const el = (
+          <circle key={i} cx={c} cy={c} r={r} fill="none" stroke={s.color} strokeWidth={strokeWidth}
+            strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset}
+            transform={`rotate(-90 ${c} ${c})`} strokeLinecap="butt" />
+        );
+        offset += dash;
+        return el;
+      })}
+      <text x={c} y={c - 6} textAnchor="middle" fontSize={size * 0.22} fontWeight={800} fill="#15181c">{total}</text>
+      <text x={c} y={c + 14} textAnchor="middle" fontSize={size * 0.09} fontWeight={600} fill="#9aa0a6">GOLES</text>
+    </svg>
+  );
+}
+
+/* Barra horizontal de comparación a favor / en contra por categoría --
+   mismo patrón visual que el ranking de minutos del informe de partido
+   (una barra de color con el ancho proporcional al máximo del bloque). */
+function GoalStatBar({ label, color, forValue, againstValue, max }) {
+  const pct = (v) => `${max ? (v / max) * 100 : 0}%`;
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, fontWeight: 700, color: "#3a3a3a", marginBottom: 3 }}>
+        <span>{label}</span>
+        <span><span style={{ color: PAL_FAVOR }}>{forValue}</span> · <span style={{ color: PAL_CONTRA }}>{againstValue}</span></span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ background: "#f0f1f3", borderRadius: 5, height: 8, overflow: "hidden" }}>
+          <div style={{ width: pct(forValue), height: "100%", background: color }} />
+        </div>
+        <div style={{ background: "#f0f1f3", borderRadius: 5, height: 8, overflow: "hidden" }}>
+          <div style={{ width: pct(againstValue), height: "100%", background: color, opacity: 0.45 }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+const PAL_FAVOR = "#1FA971", PAL_CONTRA = "#D93B4A";
+
+/* Marcador de temporada de "fases de gol", al estilo del informe de
+   Emanuel Santoro: tabla coloreada por categoría con GOLES A FAVOR y EN
+   CONTRA espejados, fila de TOTALES y una fila por partido -- aquí una fila
+   por partido propio, no por equipo rival de liga, que es la unidad que
+   tiene sentido siguiendo a un solo equipo durante la temporada. Se calcula
+   solo a partir de las fases que ya se etiquetan al registrar cada gol
+   durante el partido: no hace falta teclear nada aparte. */
+function SeasonGoalStatsView({ matches, teamName }) {
+  const rows = useMemo(() => seasonGoalStatsRows(matches), [matches]);
+  const totalsFor = useMemo(() => sumSeasonGoalCounts(rows, "forCounts"), [rows]);
+  const totalsAgainst = useMemo(() => sumSeasonGoalCounts(rows, "againstCounts"), [rows]);
+  const totalForAll = Object.values(totalsFor).reduce((a, b) => a + b, 0);
+  const totalAgainstAll = Object.values(totalsAgainst).reduce((a, b) => a + b, 0);
+
+  if (!rows.length) {
+    return <div style={{ padding: 20, textAlign: "center", color: T.dim, fontSize: 13, border: `1px dashed ${T.line}`, borderRadius: 12 }}>Todavía no hay partidos guardados para calcular el marcador de fases de gol.</div>;
+  }
+
+  const groupTotal = (totals, group) => group.phases.reduce((s, p) => s + (totals[p.key] || 0), 0);
+  const maxPhaseValue = Math.max(1, ...GOAL_PHASES.map((p) => Math.max(totalsFor[p.key] || 0, totalsAgainst[p.key] || 0)));
+
+  const thGroup = (color) => ({ background: color, color: "#fff", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.3, padding: "6px 4px", textAlign: "center", whiteSpace: "nowrap" });
+  const thPhase = (color) => ({ background: `${color}22`, color: "#15181c", fontSize: 9.5, fontWeight: 700, padding: "5px 4px", textAlign: "center", borderTop: `2px solid ${color}`, minWidth: 46 });
+  const tdNum = { padding: "5px 4px", textAlign: "center", fontSize: 12, fontVariantNumeric: "tabular-nums" };
+
+  return (
+    <div className="fadein">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, letterSpacing: 0.5, color: T.text, textTransform: "uppercase" }}>
+          <BarChart3 size={14} /> Fases de gol de la temporada
+        </div>
+        <button onClick={() => exportSeasonGoalStatsToExcel(matches, teamName)} style={{ ...ghostBtn, borderColor: T.red, color: T.red }}>
+          <FileSpreadsheet size={14} /> Exportar a Excel
+        </button>
+      </div>
+
+      {/* ---- Donuts de origen: a favor y en contra, uno junto al otro ---- */}
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+        {[{ label: "De dónde vienen nuestros goles", totals: totalsFor, total: totalForAll }, { label: "De dónde nos hacen goles", totals: totalsAgainst, total: totalAgainstAll }].map((block, i) => (
+          <div key={i} style={{ flex: "1 1 260px", background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 3px rgba(15,23,32,0.08)" }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, color: "#6b7280", textTransform: "uppercase", textAlign: "center", marginBottom: 8 }}>{block.label}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <StatDonut segments={GOAL_PHASE_GROUPS.map((g) => ({ value: groupTotal(block.totals, g), color: g.color }))} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 5, flex: 1, minWidth: 0 }}>
+                {GOAL_PHASE_GROUPS.filter((g) => groupTotal(block.totals, g) > 0).map((g) => {
+                  const v = groupTotal(block.totals, g);
+                  const pct = block.total ? Math.round((v / block.total) * 100) : 0;
+                  return (
+                    <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: "#15181c" }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: g.color, flexShrink: 0 }} />
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.label}</span>
+                      <b>{v}</b><span style={{ color: "#9aa0a6", width: 30, textAlign: "right" }}>{pct}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ---- Barras de comparación por fase individual, a favor vs en contra ---- */}
+      <div style={{ background: "#fff", borderRadius: 14, padding: 14, marginBottom: 16, boxShadow: "0 1px 3px rgba(15,23,32,0.08)" }}>
+        <div style={{ fontSize: 10.5, fontWeight: 800, color: "#6b7280", textTransform: "uppercase", marginBottom: 10 }}>
+          <span style={{ color: PAL_FAVOR }}>■</span> A favor &nbsp; <span style={{ color: PAL_CONTRA }}>■</span> En contra &nbsp;·&nbsp; por fase
+        </div>
+        {GOAL_PHASES.filter((p) => (totalsFor[p.key] || 0) + (totalsAgainst[p.key] || 0) > 0).map((p) => (
+          <GoalStatBar key={p.key} label={p.label} color={p.color} forValue={totalsFor[p.key] || 0} againstValue={totalsAgainst[p.key] || 0} max={maxPhaseValue} />
+        ))}
+      </div>
+
+      {/* ---- Tabla coloreada, estilo Santoro: TOTALES + una fila por partido ---- */}
+      <div style={{ background: "#fff", borderRadius: 14, padding: 14, overflowX: "auto", boxShadow: "0 1px 3px rgba(15,23,32,0.08)" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%" }}>
+          <thead>
+            <tr>
+              <th rowSpan={3} style={{ ...thGroup("#15181c"), textAlign: "left", padding: "6px 8px" }}>Partido</th>
+              <th colSpan={GOAL_PHASES.length + 1} style={thGroup("#3a3a3a")}>GOLES A FAVOR ({totalForAll})</th>
+              <th colSpan={GOAL_PHASES.length + 1} style={thGroup("#3a3a3a")}>GOLES EN CONTRA ({totalAgainstAll})</th>
+            </tr>
+            <tr>
+              {GOAL_PHASE_GROUPS.map((g) => (
+                <th key={`for-g-${g.id}`} colSpan={g.phases.length} style={thGroup(g.color)}>{g.label}</th>
+              ))}
+              <th rowSpan={2} style={thGroup("#3a3a3a")}>Total</th>
+              {GOAL_PHASE_GROUPS.map((g) => (
+                <th key={`against-g-${g.id}`} colSpan={g.phases.length} style={thGroup(g.color)}>{g.label}</th>
+              ))}
+              <th rowSpan={2} style={thGroup("#3a3a3a")}>Total</th>
+            </tr>
+            <tr>
+              {GOAL_PHASES.map((p) => (
+                <th key={`for-p-${p.key}`} style={thPhase(p.color)}>{p.label}</th>
+              ))}
+              {GOAL_PHASES.map((p) => (
+                <th key={`against-p-${p.key}`} style={thPhase(p.color)}>{p.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr style={{ background: "#FDF6DD" }}>
+              <td style={{ padding: "6px 8px", fontWeight: 800, fontSize: 12 }}>TOTALES</td>
+              {GOAL_PHASES.map((p) => <td key={`ft-${p.key}`} style={{ ...tdNum, fontWeight: 800 }}>{totalsFor[p.key] || 0}</td>)}
+              <td style={{ ...tdNum, fontWeight: 800 }}>{totalForAll}</td>
+              {GOAL_PHASES.map((p) => <td key={`at-${p.key}`} style={{ ...tdNum, fontWeight: 800 }}>{totalsAgainst[p.key] || 0}</td>)}
+              <td style={{ ...tdNum, fontWeight: 800 }}>{totalAgainstAll}</td>
+            </tr>
+            {rows.map((row, i) => {
+              const rowForTotal = Object.values(row.forCounts).reduce((a, b) => a + b, 0);
+              const rowAgainstTotal = Object.values(row.againstCounts).reduce((a, b) => a + b, 0);
+              return (
+                <tr key={row.date} style={{ borderTop: "1px solid #eef0f2", background: i % 2 ? "#fafbfc" : "#fff" }}>
+                  <td style={{ padding: "5px 8px", fontSize: 11, whiteSpace: "nowrap" }}>
+                    {new Date(row.date).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" })} <span style={{ color: "#9aa0a6" }}>vs {row.rivalName}</span>
+                  </td>
+                  {GOAL_PHASES.map((p) => <td key={`fr-${p.key}`} style={tdNum}>{row.forCounts[p.key] || 0}</td>)}
+                  <td style={{ ...tdNum, fontWeight: 700 }}>{rowForTotal}</td>
+                  {GOAL_PHASES.map((p) => <td key={`ar-${p.key}`} style={tdNum}>{row.againstCounts[p.key] || 0}</td>)}
+                  <td style={{ ...tdNum, fontWeight: 700 }}>{rowAgainstTotal}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
