@@ -19,6 +19,7 @@ INICIAR-SESION-GITHUB.bat
 # Copias de seguridad y exportaciones: contienen los datos del club (plantillas,
 # fotos, historial) y no tienen por que acabar en un repositorio publico.
 npa-stats_copia_*.json
+*_informe_datos.json
 *.xlsx
 *.docx
 

@@ -5182,7 +5182,12 @@ function HistoryView({ matches, trainings, teamName, teamCrest, rosterPlayers, s
         )
       )}
 
-      {subTab === "estadisticas" && <SeasonGoalStatsView matches={matches} teamName={teamName} />}
+      {subTab === "estadisticas" && (
+        <SeasonGoalStatsView
+          matches={matches} teamName={teamName}
+          onRowClick={(date) => { setOpen(date); onSubTabChange("partidos"); }}
+        />
+      )}
     </div>
   );
 }
@@ -5247,7 +5252,7 @@ const PAL_FAVOR = "#1FA971", PAL_CONTRA = "#D93B4A";
    tiene sentido siguiendo a un solo equipo durante la temporada. Se calcula
    solo a partir de las fases que ya se etiquetan al registrar cada gol
    durante el partido: no hace falta teclear nada aparte. */
-function SeasonGoalStatsView({ matches, teamName }) {
+function SeasonGoalStatsView({ matches, teamName, onRowClick }) {
   const rows = useMemo(() => seasonGoalStatsRows(matches), [matches]);
   const totalsFor = useMemo(() => sumSeasonGoalCounts(rows, "forCounts"), [rows]);
   const totalsAgainst = useMemo(() => sumSeasonGoalCounts(rows, "againstCounts"), [rows]);
@@ -5311,12 +5316,17 @@ function SeasonGoalStatsView({ matches, teamName }) {
         ))}
       </div>
 
-      {/* ---- Tabla coloreada, estilo Santoro: TOTALES + una fila por partido ---- */}
+      {/* ---- Tabla coloreada, estilo Santoro: TOTALES + una fila por partido ----
+         Con 2x9 fases + 2 totales la tabla es ancha de verdad en una tablet, así
+         que la columna de fecha/rival queda fija al hacer scroll horizontal --
+         si no, es fácil perder de qué partido es cada fila. Cada fila, además,
+         lleva al partido correspondiente en "Partidos" (mismo gesto que ya usan
+         las tarjetas del historial: tocar para abrir). */}
       <div style={{ background: "#fff", borderRadius: 14, padding: 14, overflowX: "auto", boxShadow: "0 1px 3px rgba(15,23,32,0.08)" }}>
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
           <thead>
             <tr>
-              <th rowSpan={3} style={{ ...thGroup("#15181c"), textAlign: "left", padding: "6px 8px" }}>Partido</th>
+              <th rowSpan={3} style={{ ...thGroup("#15181c"), textAlign: "left", padding: "6px 8px", position: "sticky", left: 0, zIndex: 2 }}>Partido</th>
               <th colSpan={GOAL_PHASES.length + 1} style={thGroup("#3a3a3a")}>GOLES A FAVOR ({totalForAll})</th>
               <th colSpan={GOAL_PHASES.length + 1} style={thGroup("#3a3a3a")}>GOLES EN CONTRA ({totalAgainstAll})</th>
             </tr>
@@ -5341,7 +5351,7 @@ function SeasonGoalStatsView({ matches, teamName }) {
           </thead>
           <tbody>
             <tr style={{ background: "#FDF6DD" }}>
-              <td style={{ padding: "6px 8px", fontWeight: 800, fontSize: 12 }}>TOTALES</td>
+              <td style={{ padding: "6px 8px", fontWeight: 800, fontSize: 12, position: "sticky", left: 0, background: "#FDF6DD", zIndex: 1 }}>TOTALES</td>
               {GOAL_PHASES.map((p) => <td key={`ft-${p.key}`} style={{ ...tdNum, fontWeight: 800 }}>{totalsFor[p.key] || 0}</td>)}
               <td style={{ ...tdNum, fontWeight: 800 }}>{totalForAll}</td>
               {GOAL_PHASES.map((p) => <td key={`at-${p.key}`} style={{ ...tdNum, fontWeight: 800 }}>{totalsAgainst[p.key] || 0}</td>)}
@@ -5350,10 +5360,17 @@ function SeasonGoalStatsView({ matches, teamName }) {
             {rows.map((row, i) => {
               const rowForTotal = Object.values(row.forCounts).reduce((a, b) => a + b, 0);
               const rowAgainstTotal = Object.values(row.againstCounts).reduce((a, b) => a + b, 0);
+              const rowBg = i % 2 ? "#fafbfc" : "#fff";
               return (
-                <tr key={row.date} style={{ borderTop: "1px solid #eef0f2", background: i % 2 ? "#fafbfc" : "#fff" }}>
-                  <td style={{ padding: "5px 8px", fontSize: 11, whiteSpace: "nowrap" }}>
-                    {new Date(row.date).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" })} <span style={{ color: "#9aa0a6" }}>vs {row.rivalName}</span>
+                <tr
+                  key={row.date} onClick={() => onRowClick && onRowClick(row.date)}
+                  style={{ borderTop: "1px solid #eef0f2", background: rowBg, cursor: onRowClick ? "pointer" : "default" }}
+                >
+                  <td style={{ padding: "5px 8px", fontSize: 11, whiteSpace: "nowrap", position: "sticky", left: 0, background: rowBg, zIndex: 1 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                      {new Date(row.date).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" })} <span style={{ color: "#9aa0a6" }}>vs {row.rivalName}</span>
+                      {onRowClick && <ArrowRight size={11} color="#C0202E" />}
+                    </span>
                   </td>
                   {GOAL_PHASES.map((p) => <td key={`fr-${p.key}`} style={tdNum}>{row.forCounts[p.key] || 0}</td>)}
                   <td style={{ ...tdNum, fontWeight: 700 }}>{rowForTotal}</td>
