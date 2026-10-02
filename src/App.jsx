@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import * as XLSX from "xlsx";
-import * as XLSXStyle from "xlsx-js-style";
 import {
   Play, Pause, RotateCcw, Plus, Minus, X, Save,
   Shirt, ChevronRight, Trash2, History, ClipboardList,
@@ -281,7 +279,7 @@ function uniqueSheetName(wb, desired, fallback) {
   return base.slice(0, 27) + Math.floor(Math.random() * 1000);
 }
 
-function addSheet(wb, rows, desiredName, fallback) {
+function addSheet(XLSX, wb, rows, desiredName, fallback) {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), uniqueSheetName(wb, desiredName, fallback));
 }
 
@@ -494,8 +492,11 @@ function resolveRosterPlayer(row, rosterPlayers) {
   return rosterPlayers.find((p) => p.name === row.name && String(p.number) === String(row.number)) || null;
 }
 
-function exportClubDataToExcel(matches, trainings, teamName) {
+// SheetJS solo se carga al pulsar exportar (no en el arranque de la app):
+// es una libreria pesada que la mayoria de sesiones en el pabellon nunca usa.
+async function exportClubDataToExcel(matches, trainings, teamName) {
   if (!matches.length && !trainings.length) return;
+  const XLSX = await import("xlsx");
   const wb = XLSX.utils.book_new();
 
   if (matches.length) {
@@ -515,12 +516,12 @@ function exportClubDataToExcel(matches, trainings, teamName) {
         "Duración parte (min)": m.halfLength,
       };
     });
-    addSheet(wb, summaryRows, "Resumen partidos");
+    addSheet(XLSX, wb, summaryRows, "Resumen partidos");
 
     matches.forEach((m, idx) => {
       const dateLabel = dateLabelOf(m.date);
       const rows = m.players.filter(hasActivity).map(playerRow);
-      addSheet(wb, rows, `P ${dateLabel}${m.rivalName ? " vs " + m.rivalName : ""}`, `Partido ${idx + 1}`);
+      addSheet(XLSX, wb, rows, `P ${dateLabel}${m.rivalName ? " vs " + m.rivalName : ""}`, `Partido ${idx + 1}`);
 
       // Una sola hoja por partido con las partes apiladas: separarlas en varias
       // hojas dispararia el numero de pestañas de una temporada entera.
@@ -528,19 +529,19 @@ function exportClubDataToExcel(matches, trainings, teamName) {
       halvesOf(m).forEach((h) => {
         h.players.filter(hasActivity).forEach((p) => byHalfRows.push({ Parte: h.half, ...playerRow(p) }));
       });
-      if (byHalfRows.length) addSheet(wb, byHalfRows, `Partes ${dateLabel}`, `Partes ${idx + 1}`);
+      if (byHalfRows.length) addSheet(XLSX, wb, byHalfRows, `Partes ${dateLabel}`, `Partes ${idx + 1}`);
 
       const goalRows = goalRowsOf(m);
-      if (goalRows.length) addSheet(wb, goalRows, `G ${dateLabel}`, `Goles ${idx + 1}`);
+      if (goalRows.length) addSheet(XLSX, wb, goalRows, `G ${dateLabel}`, `Goles ${idx + 1}`);
 
       const discRows = disciplineRowsOf(m);
-      if (discRows.length) addSheet(wb, discRows, `F ${dateLabel}`, `Faltas ${idx + 1}`);
+      if (discRows.length) addSheet(XLSX, wb, discRows, `F ${dateLabel}`, `Faltas ${idx + 1}`);
 
       const zoneRows = zonedRowsOf(m);
-      if (zoneRows.length) addSheet(wb, zoneRows, `Z ${dateLabel}`, `Zonas ${idx + 1}`);
+      if (zoneRows.length) addSheet(XLSX, wb, zoneRows, `Z ${dateLabel}`, `Zonas ${idx + 1}`);
 
       const rotRows = rotationRowsOf(m);
-      if (rotRows.length) addSheet(wb, rotRows, `R ${dateLabel}`, `Rotaciones ${idx + 1}`);
+      if (rotRows.length) addSheet(XLSX, wb, rotRows, `R ${dateLabel}`, `Rotaciones ${idx + 1}`);
     });
   }
 
@@ -550,7 +551,7 @@ function exportClubDataToExcel(matches, trainings, teamName) {
       "Duración sesión": fmtMin(t.durationSeconds),
       "Jugadores con actividad": t.players.filter((p) => p.seconds > 0).length,
     }));
-    addSheet(wb, trainingSummaryRows, "Resumen entrenos");
+    addSheet(XLSX, wb, trainingSummaryRows, "Resumen entrenos");
 
     trainings.forEach((t, idx) => {
       const rows = t.players
@@ -559,14 +560,15 @@ function exportClubDataToExcel(matches, trainings, teamName) {
           Dorsal: p.number, Jugador: p.name, Posición: p.position,
           "Tiempo activo": fmtMin(p.seconds), "Segundos activo": p.seconds,
         }));
-      addSheet(wb, rows, `E ${dateLabelOf(t.date)}`, `Entreno ${idx + 1}`);
+      addSheet(XLSX, wb, rows, `E ${dateLabelOf(t.date)}`, `Entreno ${idx + 1}`);
     });
   }
 
   XLSX.writeFile(wb, `${sanitizeFileName(teamName) || "equipo"}_estadisticas_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
-function exportSingleMatchToExcel(match, teamName) {
+async function exportSingleMatchToExcel(match, teamName) {
+  const XLSX = await import("xlsx");
   const wb = XLSX.utils.book_new();
   const h1 = halfScore(match, 1), h2 = halfScore(match, 2);
   const otHalves = matchHalvesPresent(match).filter((h) => h > 2);
@@ -582,31 +584,31 @@ function exportSingleMatchToExcel(match, teamName) {
     ...(otHalves.length ? { "Prórroga": otHalves.map((h) => { const sc = halfScore(match, h); return `${sc.favor}-${sc.contra}`; }).join(" / ") } : {}),
     "Duración parte (min)": match.halfLength,
   }];
-  addSheet(wb, summary, "Resumen");
+  addSheet(XLSX, wb, summary, "Resumen");
 
-  addSheet(wb, match.players.filter(hasActivity).map(playerRow), "Total partido");
+  addSheet(XLSX, wb, match.players.filter(hasActivity).map(playerRow), "Total partido");
 
   // Una hoja por parte, que es como se analiza despues: que paso en la primera
   // y que paso en la segunda.
   halvesOf(match).forEach((h) => {
     const rows = h.players.filter(hasActivity).map(playerRow);
-    if (rows.length) addSheet(wb, rows, halfLabel(h.half), `Parte ${h.half}`);
+    if (rows.length) addSheet(XLSX, wb, rows, halfLabel(h.half), `Parte ${h.half}`);
   });
 
   const goalRows = goalRowsOf(match);
-  if (goalRows.length) addSheet(wb, goalRows, "Goles");
+  if (goalRows.length) addSheet(XLSX, wb, goalRows, "Goles");
 
   const discRows = disciplineRowsOf(match);
-  if (discRows.length) addSheet(wb, discRows, "Faltas y tarjetas");
+  if (discRows.length) addSheet(XLSX, wb, discRows, "Faltas y tarjetas");
 
   const zoneRows = zonedRowsOf(match);
-  if (zoneRows.length) addSheet(wb, zoneRows, "Zonas");
+  if (zoneRows.length) addSheet(XLSX, wb, zoneRows, "Zonas");
 
   const rotRows = rotationRowsOf(match);
-  if (rotRows.length) addSheet(wb, rotRows, "Rotaciones");
+  if (rotRows.length) addSheet(XLSX, wb, rotRows, "Rotaciones");
 
   if ((match.convocados || []).length) {
-    addSheet(wb, match.convocados.map((p) => ({ Dorsal: p.number, Jugador: p.name })), "Convocatoria");
+    addSheet(XLSX, wb, match.convocados.map((p) => ({ Dorsal: p.number, Jugador: p.name })), "Convocatoria");
   }
 
   const dateLabel = dateLabelOf(match.date);
@@ -635,7 +637,7 @@ const XLSX_THIN_BORDER = { top: { style: "thin", color: { rgb: "D9D9D9" } }, bot
 const xlsxFill = (hex) => ({ patternType: "solid", fgColor: { rgb: rgbNoHash(hex) } });
 const xlsxCenter = { horizontal: "center", vertical: "center", wrapText: true };
 
-function buildSeasonGoalStatsSheet(rows, teamName) {
+function buildSeasonGoalStatsSheet(XLSXStyle, rows, teamName) {
   const groups = GOAL_PHASE_GROUPS;
   const blocks = [
     { key: "forCounts", label: "GOLES A FAVOR" },
@@ -729,11 +731,15 @@ function buildSeasonGoalStatsSheet(rows, teamName) {
   return ws;
 }
 
-function exportSeasonGoalStatsToExcel(matches, teamName) {
+async function exportSeasonGoalStatsToExcel(matches, teamName) {
   const rows = seasonGoalStatsRows(matches);
   if (!rows.length) return;
+  // "xlsx-js-style" (no el "xlsx" de arriba) porque la edicion community de
+  // SheetJS descarta los colores de celda al escribir el archivo -- las dos
+  // son pesadas, asi que las dos se cargan solo al pulsar exportar.
+  const XLSXStyle = await import("xlsx-js-style");
   const wb = XLSXStyle.utils.book_new();
-  XLSXStyle.utils.book_append_sheet(wb, buildSeasonGoalStatsSheet(rows, teamName), "Fases de gol");
+  XLSXStyle.utils.book_append_sheet(wb, buildSeasonGoalStatsSheet(XLSXStyle, rows, teamName), "Fases de gol");
   XLSXStyle.writeFile(wb, `${sanitizeFileName(teamName) || "equipo"}_fases_de_gol_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
@@ -3061,7 +3067,7 @@ export default function App() {
     // El borrador solo se borra si el partido quedó guardado de verdad; si el
     // guardado falla, la copia sigue ahí para poder recuperarlo.
     if (saved) await clearMatchDraft(activeTeamId);
-    try { exportSingleMatchToExcel(record, activeTeam.name); } catch (e) {}
+    try { await exportSingleMatchToExcel(record, activeTeam.name); } catch (e) {}
     // El informe en PDF ya NO se abre solo: se genera a propósito con el
     // botón "Crear informe" del partido, aquí en el Historial adonde se
     // llega justo después de finalizar.

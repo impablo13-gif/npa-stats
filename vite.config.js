@@ -9,11 +9,6 @@ const base = process.env.BASE_PATH || "/npa-stats/";
 
 export default defineConfig({
   base,
-  build: {
-    // El bundle de SheetJS es grande por naturaleza; no es un problema real
-    // porque se descarga una sola vez y despues vive en la cache del navegador.
-    chunkSizeWarningLimit: 1200,
-  },
   plugins: [
     react(),
     VitePWA({
@@ -44,9 +39,27 @@ export default defineConfig({
         // Todo lo que la app necesita para arrancar queda precacheado: sin esto
         // el primer partido sin wifi se quedaria en pantalla en blanco.
         globPatterns: ["**/*.{js,css,html,svg,png,woff,woff2}"],
+        // "xlsx" y "xlsx-js-style" (exportar a Excel) son pesadas de verdad y
+        // solo las usa quien pulsa exportar -- igual que el nucleo de ffmpeg en
+        // el correctivo de video, no hace falta que bajen con el resto de la
+        // app en la primera instalacion. Quedan fuera del precache de arranque
+        // y se guardan aparte, en cuanto se usan una vez, para seguir
+        // funcionando sin conexion a partir de ahi.
+        globIgnores: ["**/xlsx*.js"],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallback: base + "index.html",
         cleanupOutdatedCaches: true,
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith(`${base}assets/`) && /\/xlsx.*\.js$/.test(url.pathname),
+            handler: "CacheFirst",
+            options: {
+              cacheName: "xlsx-libs",
+              expiration: { maxEntries: 4, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
       },
       devOptions: { enabled: false },
     }),
