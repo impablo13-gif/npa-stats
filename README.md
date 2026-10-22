@@ -41,7 +41,9 @@ archivo de copia, en *Inicio → Copia de seguridad*:
     copia sin tocar los que ya tuviera. Si un equipo ya estaba, su plantilla
     pasa a ser la de la copia y sus partidos se suman a los que hubiera.
   - *Reemplazar todo* — para una tablet nueva o de sustitución: deja el
-    dispositivo igual que el que hizo la copia. No se puede deshacer.
+    dispositivo igual que el que hizo la copia. No se puede deshacer, pero se
+    aplica en una sola operación: si falla a mitad (sin espacio, archivo
+    dañado), no cambia nada y la app avisa del error.
 
 Conviene crear una copia de vez en cuando: es lo único que protege los datos si
 la tablet se rompe o se pierde. El partido en curso no entra en la copia, solo
@@ -129,7 +131,11 @@ llamarlo como quieras. Si algún día lo pones en un dominio propio, compila con
 Cada `git push` a `main` publica una versión nueva. Las tablets que ya la tengan
 instalada **no se actualizan solas a mitad de uso**: aparece un aviso en la
 pantalla de inicio de la app («Hay una versión nueva…») y se aplica al pulsar
-*Actualizar ahora*, que además se niega a hacerlo con el reloj en marcha.
+*Actualizar ahora*, que además se niega a hacerlo con el reloj en marcha. El
+aviso sale en Inicio, Plantilla e Historial. Al pie de Inicio se ve la **versión
+instalada en ese dispositivo** (el commit con el que se compiló y la fecha), con
+un botón *Buscar actualizaciones* que fuerza la comprobación: es la forma de
+saber con certeza si una tablet o un móvil tiene ya lo último.
 
 ---
 
@@ -197,6 +203,16 @@ nueve zonas que ya usan pérdidas, recuperaciones y tiros, y luego se ve
 junto a los tiros en el informe (en verde, para distinguirla de los tiros a
 puerta y fuera). Un gol del rival solo pide la fase — no tiene autor propio
 ni tiene sentido pedirle asistencia o zona.
+
+Los goles y las asistencias **solo se anotan con el botón Gol** (la Ficha del
+jugador no los deja tocar): un gol sumado a mano subía el marcador pero no dejaba
+fase, asistente ni zona, y el resumen, la tabla de fases y el informe no lo veían.
+El «−» del marcador rival quita el último gol rival de verdad, con su fase. «Sin
+asistencia» cubre el gol que el autor genera él solo: no existe la autoasistencia.
+
+La **duración de las partes** solo se puede cambiar antes de arrancar el reloj.
+Las faltas acumuladas se cuentan por parte, pero las de la 2ª parte siguen
+sumando en la prórroga (la 6ª falta acumulada ya es de 10 m).
 
 Un gol ya registrado se puede corregir: el icono de engranaje junto a cada
 gol deja cambiar quién marcó y de qué fase vino. Los minutos y el quinteto en

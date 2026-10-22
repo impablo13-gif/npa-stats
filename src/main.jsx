@@ -19,6 +19,9 @@ const updateSW = registerSW({
   },
   onNeedRefresh() {
     refreshPending = true;
+    // Ademas del evento, queda una marca: si la app aun no habia montado su
+    // escucha cuando esto salto (arranque en un movil lento), la lee al montar.
+    window.__npaUpdateReady = true;
     window.dispatchEvent(new CustomEvent("npa:update-ready"));
   },
 });
