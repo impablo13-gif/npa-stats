@@ -77,6 +77,18 @@ function halvesPresent(statsByHalf, goalEvents) {
 
 const halfLabel = (h) => (h <= 2 ? `${h}ª parte` : `Prórroga ${h - 2}`);
 
+// Las faltas acumuladas se cuentan por parte, pero según la FIFA las de la 2ª
+// parte siguen sumando en la prórroga: la 6ª falta acumulada ya es de 10 m
+// aunque se cometa en el tiempo extra. Cada falta se guarda en su propia parte
+// (para el historial); aquí solo se suma lo que cuenta de cara a la 6ª.
+function accumulatedFouls(byHalf, half) {
+  const map = byHalf || {};
+  if (half <= 2) return map[half] || 0;
+  return Object.entries(map)
+    .filter(([k]) => Number(k) >= 2 && Number(k) <= half)
+    .reduce((s, [, v]) => s + (v || 0), 0);
+}
+
 // El fútbol sala solo tiene 2 partes reglamentarias. La prórroga (solo en
 // partidos de eliminatoria, nunca en liga) son 2 partes fijas de 3 minutos
 // cada una, independientes de la duración configurada para el partido.
@@ -159,7 +171,6 @@ const QUICK_STAT_ACTIONS = [
   { key: "recoveries", label: "Recuperación", icon: Shield, color: T.red },
   { key: "fouls", label: "Falta cometida", icon: AlertTriangle, color: T.negative },
   { key: "foulsReceived", label: "Falta recibida", icon: Shield, color: T.red },
-  { key: "assists", label: "Asistencia", icon: ArrowLeftRight, color: T.red },
   { key: "saves", label: "Parada", icon: Hand, color: T.red },
 ];
 
@@ -754,6 +765,15 @@ const POS_GROUP_ICON = { POR: "🧤", CIE: "🛡", ALA: "🪽", PIV: "🎯" };
 // `rosterPlayers` es la plantilla ACTUAL (con fotos) — se cruza con los datos
 // guardados del partido para poder ilustrarlo, ya que las fotos no se
 // guardan dentro del propio partido. `teamCrest` es el escudo del equipo.
+// Las fotos y escudos se guardan como data URL y el informe los mete dentro de
+// un atributo src="...". Una copia de seguridad ajena podia traer en ese campo
+// algo como `x" onerror="...` y ejecutar codigo al abrir el informe, asi que solo
+// pasa lo que de verdad es una imagen en base64 (lo unico que genera la app).
+const SAFE_IMG_SRC = /^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+function safeImgSrc(v) {
+  return typeof v === "string" && SAFE_IMG_SRC.test(v) ? v : "";
+}
+
 function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const dateStr = new Date(match.date).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" });
   const presentHalves = matchHalvesPresent(match);
@@ -776,7 +796,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
 
   const avatarImg = (row, size = 32) => {
     const rp = resolveRosterPlayer(row, rosterPlayers);
-    const photo = rp && rp.photo;
+    const photo = safeImgSrc(rp && rp.photo);
     if (photo) return `<img src="${photo}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;border:1px solid #ddd;flex-shrink:0;" />`;
     return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:#eee;display:flex;align-items:center;justify-content:center;font-size:${Math.round(size * 0.36)}px;font-weight:700;color:#888;border:1px solid #ddd;flex-shrink:0;">${esc(row.number)}</div>`;
   };
@@ -1120,7 +1140,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
   const courtFrame = (cellsHtml) => `
     <div style="position:relative; border:1.5px solid #BFDDF3; border-radius:12px; overflow:hidden; background:repeating-linear-gradient(90deg,#EFF6FC 0,#EFF6FC 12.5%,#F8FBFE 12.5%,#F8FBFE 25%); aspect-ratio:1/1.2; max-width:230px; margin:0 auto;">
       ${courtLinesSvg()}
-      ${teamCrest ? `<img src="${teamCrest}" style="position:absolute; top:50%; left:50%; width:24%; transform:translate(-50%,-50%); opacity:0.15;" />` : ""}
+      ${safeImgSrc(teamCrest) ? `<img src="${safeImgSrc(teamCrest)}" style="position:absolute; top:50%; left:50%; width:24%; transform:translate(-50%,-50%); opacity:0.15;" />` : ""}
       <div style="position:absolute; left:2px; top:8px; bottom:8px; display:flex; align-items:center; z-index:2; pointer-events:none;">
         <span style="writing-mode:vertical-rl; font-size:6.5px; font-weight:800; letter-spacing:1.4px; color:#5B9BCB; white-space:nowrap;">▲ ATAQUE</span>
       </div>
@@ -1392,7 +1412,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
         <div style="display:flex; align-items:center; gap:12px;">
           <div style="width:48px; height:48px; border-radius:11px; background:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0;">
-            ${teamCrest ? `<img src="${teamCrest}" style="width:100%; height:100%; object-fit:cover;" />` : `<span style="font-size:20px;">🛡</span>`}
+            ${safeImgSrc(teamCrest) ? `<img src="${safeImgSrc(teamCrest)}" style="width:100%; height:100%; object-fit:cover;" />` : `<span style="font-size:20px;">🛡</span>`}
           </div>
           <div>
             <div style="font-size:18px; font-weight:800; line-height:1.2;">${esc(teamName || "Equipo")}</div>
@@ -1405,7 +1425,7 @@ function buildMatchReportHtml(match, teamName, rosterPlayers, teamCrest) {
             <span style="font-size:14px; font-weight:700;">${esc(teamName || "Equipo")}</span>
             <span style="background:rgba(255,255,255,0.96); color:#15181c; border-radius:9px; padding:5px 14px; font-size:18px; font-weight:800; letter-spacing:0.5px;">${esc(match.teamGoals)} - ${esc(match.rivalScore)}</span>
             <span style="font-size:14px; font-weight:700;">${esc(match.rivalName || "Rival")}</span>
-            ${match.rivalCrest ? `<img src="${match.rivalCrest}" style="width:26px; height:26px; border-radius:6px; object-fit:cover; background:#fff;" />` : ""}
+            ${safeImgSrc(match.rivalCrest) ? `<img src="${safeImgSrc(match.rivalCrest)}" style="width:26px; height:26px; border-radius:6px; object-fit:cover; background:#fff;" />` : ""}
           </div>
         </div>
       </div>
@@ -1903,6 +1923,8 @@ export default function App() {
   const [cropTarget, setCropTarget] = useState(null); // { kind: 'player'|'teamCrest'|'rivalCrest', id, src }
   const [pendingDrafts, setPendingDrafts] = useState(null); // { match?, training? } sesiones sin cerrar encontradas al abrir
   const [backupOpen, setBackupOpen] = useState(false);
+  const [confirmRemovePlayer, setConfirmRemovePlayer] = useState(null); // jugador a punto de quitarse de la plantilla
+  const [confirmRemoveTeam, setConfirmRemoveTeam] = useState(null); // equipo a punto de borrarse con todos sus datos
   const [installPrompt, setInstallPrompt] = useState(null);
   const [updateReady, setUpdateReady] = useState(false);
   const [standalone] = useState(isStandaloneApp);
@@ -2194,6 +2216,7 @@ export default function App() {
     const onPrompt = (e) => { e.preventDefault(); setInstallPrompt(e); };
     const onUpdate = () => setUpdateReady(true);
     const onInstalled = () => { setInstallPrompt(null); showToast("App instalada — ya funciona sin conexión"); };
+    if (window.__npaUpdateReady) setUpdateReady(true);
     window.addEventListener("beforeinstallprompt", onPrompt);
     window.addEventListener("npa:update-ready", onUpdate);
     window.addEventListener("appinstalled", onInstalled);
@@ -2225,7 +2248,7 @@ export default function App() {
     window.dispatchEvent(new CustomEvent("npa:check-update"));
     showToast("Buscando actualización…");
     setTimeout(() => {
-      if (!updateReadyRef.current) showToast("Ya tienes la última versión");
+      if (!updateReadyRef.current) showToast(`Ya tienes la última versión (${__APP_VERSION__})`);
     }, 3000);
   };
 
@@ -2699,7 +2722,12 @@ export default function App() {
       return;
     }
     if (!lastEvent) return;
-    if (lastEvent.discId) setDisciplineEvents((prev) => prev.filter((e) => e.id !== lastEvent.discId));
+    if (lastEvent.discId) {
+      setDisciplineEvents((prev) => prev.filter((e) => e.id !== lastEvent.discId));
+      // Una roja deshecha tambien deja de servirse: la inferioridad nace con el
+      // mismo id que el evento de disciplina.
+      setShortHandedRestrictions((prev) => prev.filter((r) => r.id !== lastEvent.discId));
+    }
     bump(lastEvent.playerId, lastEvent.key, -1, lastEvent.half);
     setLastEvent(null);
     showToast("Acción deshecha");
@@ -2749,6 +2777,20 @@ export default function App() {
   const armGoal = () => { setActionsPopoverOpen(false); setPendingAction(null); setGoalWizard({ type: "for", authorId: null, authorName: null }); };
   const armRivalGoal = () => { setPendingAction(null); setGoalWizard({ type: "against", authorId: null, authorName: null }); };
   const cancelGoalWizard = () => setGoalWizard(null);
+
+  // El "−" del marcador rival quita el ultimo gol rival de verdad (su evento),
+  // no solo el numero: si no, el marcador y el resumen/fases/informe se
+  // contradicen. Sin eventos (borrador antiguo) solo baja el contador.
+  const removeRivalGoal = () => {
+    const lastIdx = goalEvents.map((e) => e.type).lastIndexOf("against");
+    if (lastIdx === -1) { setRivalScore((v) => Math.max(0, v - 1)); return; }
+    const removed = goalEvents[lastIdx];
+    setGoalEvents((prev) => prev.filter((e) => e.id !== removed.id));
+    setRivalScore((v) => Math.max(0, v - 1));
+    if (lastGoalEvent && lastGoalEvent.id === removed.id) { setLastGoalEvent(null); setLastEvent(null); }
+    showToast("Gol rival quitado");
+    saveDraftNow();
+  };
 
   const finalizeGoalEvent = (wizard) => {
     const onCourtSnapshot = players
@@ -2959,7 +3001,14 @@ export default function App() {
     });
   };
 
+  // Quitar a alguien de la plantilla pide confirmacion: en el partido en curso
+  // sus estadisticas dejan de contar al guardar (los partidos ya guardados no
+  // se tocan, llevan sus propios nombres y datos).
+  const askRemovePlayer = (id) => setConfirmRemovePlayer(players.find((p) => p.id === id) || null);
+
   const removePlayer = (id) => {
+    setConfirmRemovePlayer(null);
+    stintsRef.current.delete(id);
     setPlayers((prev) => { const next = prev.filter((p) => p.id !== id); persistRoster(next); return next; });
     setOnCourt((prev) => prev.filter((x) => x !== id));
     setTrainingActive((prev) => prev.filter((x) => x !== id));
@@ -3129,17 +3178,39 @@ export default function App() {
   const editTeamField = (id, patch) => setTeams((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   const commitTeams = () => persistTeams(teams);
 
+  const askRemoveTeam = (id) => {
+    if (teams.length <= 1) { showToast("Debe quedar al menos un equipo"); return; }
+    setConfirmRemoveTeam(teams.find((t) => t.id === id) || null);
+  };
+
+  // Borra TODO lo del equipo, no solo su entrada en la lista: si no, la
+  // plantilla (con fotos), los partidos y los entrenos se quedaban en el
+  // dispositivo y viajaban en cada copia de seguridad sin forma de quitarlos.
+  const purgeTeamData = async (id) => {
+    for (const prefix of [`matches:${id}:`, `trainings:${id}:`]) {
+      const found = await storage.list(prefix);
+      for (const key of (found && found.keys) || []) await storage.del(key);
+    }
+    for (const key of [`roster:${id}`, matchDraftKey(id), trainingDraftKey(id)]) await storage.del(key);
+  };
+
   const removeTeamAction = async (id) => {
+    setConfirmRemoveTeam(null);
     if (teams.length <= 1) { showToast("Debe quedar al menos un equipo"); return; }
     const next = teams.filter((t) => t.id !== id);
     setTeams(next); persistTeams(next);
+    // Primero se cambia de equipo (eso guarda el borrador del actual) y solo
+    // despues se purga, para que ese guardado no recree lo que se acaba de borrar.
     if (id === activeTeamId) await switchTeam(next[0].id);
+    await purgeTeamData(id);
+    showToast("Equipo borrado");
   };
 
   const statP = statPlayer ? players.find((p) => p.id === statPlayer) : null;
   const totalHalfSeconds = Math.max(1, halfMinutesFor(half, halfLength) * 60);
   const remaining = Math.max(0, totalHalfSeconds - seconds);
   const halfProgress = remaining / totalHalfSeconds;
+  const durationLocked = running || seconds > 0 || half > 1;
   const onCourtCount = onCourt.length;
 
   // Mientras haya una roja "sirviéndose", 1 en pista menos por cada una
@@ -3153,8 +3224,8 @@ export default function App() {
   // suya), solo se enseña como aviso con su propio mini-crono.
   const activeRivalShortHanded = rivalShortHandedRestrictions.filter((r) => r.half === half && (r.startRemaining - remaining) < 120);
   const restrictionTimeLeft = (r) => Math.max(0, 120 - (r.startRemaining - remaining));
-  const currentTeamFouls = teamFouls[half] || 0;
-  const currentRivalTeamFouls = rivalTeamFouls[half] || 0;
+  const currentTeamFouls = accumulatedFouls(teamFouls, half);
+  const currentRivalTeamFouls = accumulatedFouls(rivalTeamFouls, half);
 
   const sortedPlayers = [...players].sort((a, b) => {
     const aOn = onCourt.includes(a.id), bOn = onCourt.includes(b.id);
@@ -3244,7 +3315,7 @@ export default function App() {
                   crest={<CrestAvatar crest={rivalCrest} size={32} onPick={handleRivalCrestFile} onReframe={handleRivalCrestReframe} onRemove={handleRivalCrestRemove} />}
                   score={
                     <div className="oswald" style={{ fontSize: 26, fontWeight: 700, color: T.negative, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
-                      <button onClick={() => setRivalScore((v) => Math.max(0, v - 1))} style={iconBtnSm}><Minus size={11} /></button>
+                      <button onClick={removeRivalGoal} style={iconBtnSm} title="Quitar el último gol rival"><Minus size={11} /></button>
                       {rivalScore}
                       <button onClick={armRivalGoal} style={{ ...iconBtnSm, background: T.negative, color: "#0A0A0A" }} title="Registrar gol rival"><Plus size={11} /></button>
                     </div>
@@ -3298,9 +3369,16 @@ export default function App() {
                 <FoulsChip label="Rival" value={currentRivalTeamFouls} onInc={() => setRivalTeamFouls((v) => ({ ...v, [half]: (v[half] || 0) + 1 }))} onDec={() => setRivalTeamFouls((v) => ({ ...v, [half]: Math.max(0, (v[half] || 0) - 1) }))} />
               </div>
               {half <= 2 ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: T.dim }}>
+                // Cambiar la duración con el partido empezado recalcula el reloj
+                // y descuadra las rotaciones y goles ya anotados con la anterior:
+                // solo se puede fijar antes de arrancar la 1ª parte.
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: T.dim }} title={durationLocked ? "La duración solo se puede cambiar antes de empezar el partido" : undefined}>
                   Duración
-                  <input type="number" value={halfLength} onChange={(e) => setHalfLength(Math.max(1, Number(e.target.value) || 1))} style={{ width: 52, background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 6, color: T.text, padding: "3px 5px", fontSize: 14 }} />
+                  <input
+                    type="number" min={1} max={60} value={halfLength} disabled={durationLocked}
+                    onChange={(e) => { if (e.target.value === "") return; setHalfLength(clamp(Math.round(Number(e.target.value)) || 1, 1, 60)); }}
+                    style={{ width: 52, background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 6, color: T.text, padding: "3px 5px", fontSize: 14, opacity: durationLocked ? 0.5 : 1 }}
+                  />
                   min
                 </div>
               ) : (
@@ -3429,8 +3507,10 @@ export default function App() {
           </div>
         )}
 
+        {updateReady && (view === "plantilla" || view === "historial") && <UpdateBanner onApply={applyUpdate} />}
+
         {view === "plantilla" && (
-          <RosterEditor players={players} onAdd={addPlayer} onRemove={removePlayer} onSave={savePlayerEdit} onNewFile={handleNewFile} onReframe={handleReframe} />
+          <RosterEditor players={players} onAdd={addPlayer} onRemove={askRemovePlayer} onSave={savePlayerEdit} onNewFile={handleNewFile} onReframe={handleReframe} />
         )}
 
         {view === "entrenamiento" && (
@@ -3601,9 +3681,41 @@ export default function App() {
           onReframeCrest={handleTeamCrestReframe}
           onRemoveCrest={handleTeamCrestRemove}
           onAdd={addTeamAction}
-          onRemove={removeTeamAction}
+          onRemove={askRemoveTeam}
           onClose={() => setTeamManagerOpen(false)}
         />
+      )}
+
+      {confirmRemoveTeam && (
+        <div style={{ ...overlayStyle, alignItems: "center", zIndex: 96 }} onClick={() => setConfirmRemoveTeam(null)}>
+          <div style={{ ...modalCard, maxWidth: 340, borderRadius: 16 }} onClick={(e) => e.stopPropagation()}>
+            <div className="oswald" style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>¿Borrar el equipo «{confirmRemoveTeam.name}»?</div>
+            <div style={{ fontSize: 13, color: T.dim, marginBottom: 18 }}>
+              Se borrarán su plantilla con las fotos, todos sus partidos y entrenos guardados y cualquier partido a medias.
+              <strong style={{ color: T.negative }}> No se puede deshacer.</strong> Si dudas, crea antes una copia de seguridad.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setConfirmRemoveTeam(null)} style={{ ...ghostBtn, flex: 1, justifyContent: "center" }}>Cancelar</button>
+              <button onClick={() => removeTeamAction(confirmRemoveTeam.id)} style={{ ...bigBtn, flex: 1, justifyContent: "center", background: T.negative, color: T.white }}><Trash2 size={15} /> Borrar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmRemovePlayer && (
+        <div style={{ ...overlayStyle, alignItems: "center", zIndex: 96 }} onClick={() => setConfirmRemovePlayer(null)}>
+          <div style={{ ...modalCard, maxWidth: 340, borderRadius: 16 }} onClick={(e) => e.stopPropagation()}>
+            <div className="oswald" style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>¿Quitar a {confirmRemovePlayer.name} de la plantilla?</div>
+            <div style={{ fontSize: 13, color: T.dim, marginBottom: 18 }}>
+              Los partidos ya guardados conservan sus datos.
+              {matchInProgress && <> <strong style={{ color: T.amber }}>Si hay un partido en marcha, sus estadísticas de ese partido no se guardarán.</strong></>}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setConfirmRemovePlayer(null)} style={{ ...ghostBtn, flex: 1, justifyContent: "center" }}>Cancelar</button>
+              <button onClick={() => removePlayer(confirmRemovePlayer.id)} style={{ ...bigBtn, flex: 1, justifyContent: "center", background: T.negative, color: T.white }}><Trash2 size={15} /> Quitar</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {view === "partido" && (
@@ -3746,7 +3858,7 @@ function BackupModal({ onClose, showToast, clockBusy, matchInProgress, onBeforeE
           <button onClick={onClose} style={iconBtnSm}><X size={16} /></button>
         </div>
         <div style={{ fontSize: 12, color: T.dim, lineHeight: 1.5, marginBottom: 16 }}>
-          Los datos viven solo en esta tablet. Una copia sirve para pasárselos a otra persona
+          Los datos viven solo en este dispositivo. Una copia sirve para pasárselos a otra persona
           y para no perderlos si el dispositivo se rompe.
         </div>
 
@@ -3824,7 +3936,7 @@ function BackupModal({ onClose, showToast, clockBusy, matchInProgress, onBeforeE
                 <AlertTriangle size={14} color={T.negative} /> Reemplazar todo
               </div>
               <div style={{ fontSize: 11, color: T.dim, lineHeight: 1.5 }}>
-                Borra lo que haya ahora en esta tablet y la deja igual que la que hizo la copia.
+                Borra lo que haya ahora en este dispositivo y la deja igual que la que hizo la copia.
                 Es lo que se quiere en un dispositivo nuevo. <strong style={{ color: T.negative }}>No se puede deshacer.</strong>
               </div>
             </button>
@@ -3854,7 +3966,7 @@ function DraftRecoveryModal({ drafts, teamName, onResumeMatch, onDiscardMatch, o
       <div style={{ ...modalCard, maxWidth: 440, borderRadius: 16 }} className="fadein">
         <div className="oswald" style={{ fontSize: 19, fontWeight: 600, marginBottom: 4 }}>Hay algo sin terminar</div>
         <div style={{ fontSize: 12, color: T.dim, marginBottom: 16 }}>
-          La app guarda sola lo que va pasando, así que esto sigue aquí aunque se cerrara el navegador o se apagara la tablet.
+          La app guarda sola lo que va pasando, así que esto sigue aquí aunque se cerrara el navegador o se apagara el dispositivo.
         </div>
 
         {m && (
@@ -4006,8 +4118,11 @@ function AssistPopover({ goalWizard, players, onPick, onClose }) {
         </div>
 
         <div style={{ display: "flex", gap: 8, margin: "10px 0 12px" }}>
+          {/* Una asistencia es el pase de OTRO compañero: si el autor generó la
+              jugada él solo (robo, rebote propio...), es "Sin asistencia". Antes
+              había un botón "Autoasistencia" que le sumaba una asistencia al
+              propio goleador. */}
           <button onClick={() => onPick(null, null)} style={{ ...ghostBtn, flex: 1, justifyContent: "center" }}>Sin asistencia</button>
-          <button onClick={() => onPick(goalWizard.authorId, goalWizard.authorName)} style={{ ...ghostBtn, flex: 1, justifyContent: "center" }} title="El propio autor generó la jugada él solo (robo, rebote propio...)">Autoasistencia</button>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto" }}>
@@ -4680,6 +4795,15 @@ function ScoreColumn({ labelNode, crest, score }) {
   );
 }
 
+function UpdateBanner({ onApply }) {
+  return (
+    <div style={{ maxWidth: 760, margin: "0 auto 16px", background: "rgba(230,57,70,0.12)", border: `1.5px solid ${T.red}`, borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+      <span style={{ fontSize: 13, color: T.text, fontWeight: 600 }}>Hay una versión nueva de la app lista para instalar.</span>
+      <button onClick={onApply} style={{ ...ghostBtn, borderColor: T.red, color: T.red, fontSize: 12, padding: "8px 14px", fontWeight: 700 }}><RefreshCw size={13} /> Actualizar ahora</button>
+    </div>
+  );
+}
+
 function HomeView({
   team, onPickCrest, onReframeCrest, onRemoveCrest, matches, trainings, onNewMatch, onNewTraining,
   onGoRoster, onGoHistory, onExport, playerCount, onOpenTeams, teamCount,
@@ -4712,12 +4836,7 @@ function HomeView({
         </div>
       )}
 
-      {updateReady && (
-        <div style={{ maxWidth: 760, margin: "0 auto 16px", background: T.surface, border: `1px solid ${T.line}`, borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12, color: T.dim }}>Hay una versión nueva de la app lista para instalar.</span>
-          <button onClick={onApplyUpdate} style={{ ...ghostBtn, borderColor: T.red, color: T.red, fontSize: 11, padding: "6px 12px" }}><RefreshCw size={12} /> Actualizar ahora</button>
-        </div>
-      )}
+      {updateReady && <UpdateBanner onApply={onApplyUpdate} />}
 
       {matches.length > 0 && (
         <div style={{ display: "flex", justifyContent: "center", gap: 20, marginBottom: 24, flexWrap: "wrap" }}>
@@ -4735,7 +4854,7 @@ function HomeView({
         <HomeTile icon={Shirt} title="Plantilla" desc={`Gestiona jugadores, fotos y dorsales (${playerCount})`} color={T.text} onClick={onGoRoster} />
         <HomeTile icon={Trophy} title="Historial" desc={hasHistory ? `${matches.length} partido${matches.length === 1 ? "" : "s"} · ${trainings.length} entreno${trainings.length === 1 ? "" : "s"}` : "Todavía no hay partidos ni entrenamientos guardados"} color={T.text} onClick={onGoHistory} />
         <HomeTile icon={FileSpreadsheet} title="Exportar a Excel" desc={hasHistory ? "Descarga todas las estadísticas" : "Disponible cuando haya datos guardados"} color={hasHistory ? T.red : T.dim} onClick={hasHistory ? onExport : undefined} disabled={!hasHistory} />
-        <HomeTile icon={DatabaseBackup} title="Copia de seguridad" desc="Pasa los datos a otra tablet o recupéralos si esta se rompe" color={T.text} onClick={onOpenBackup} />
+        <HomeTile icon={DatabaseBackup} title="Copia de seguridad" desc="Pasa los datos a otro dispositivo o recupéralos si este se rompe" color={T.text} onClick={onOpenBackup} />
       </div>
 
       {/* Instalarla en la pantalla de inicio es lo que garantiza que en el
@@ -4744,7 +4863,7 @@ function HomeView({
         <div style={{ maxWidth: 760, margin: "20px auto 0", background: T.surface, border: `1px solid ${T.line}`, borderRadius: 14, padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
             <Download size={16} color={T.red} />
-            <span className="oswald" style={{ fontSize: 15, fontWeight: 600 }}>Instálala en la tablet</span>
+            <span className="oswald" style={{ fontSize: 15, fontWeight: 600 }}>Instálala en tu dispositivo</span>
           </div>
           <div style={{ fontSize: 12, color: T.dim, lineHeight: 1.5 }}>
             {canInstall
@@ -4764,9 +4883,15 @@ function HomeView({
       <div style={{ maxWidth: 760, margin: "16px auto 0", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 11, color: T.dim, textAlign: "center", flexWrap: "wrap" }}>
         <WifiOff size={12} />
         Funciona sin conexión · los datos se guardan solo en este dispositivo
+      </div>
+
+      {/* La versión que corre en ESTE dispositivo, a la vista: es lo único que
+          permite saber si una actualización ha llegado de verdad. */}
+      <div style={{ maxWidth: 760, margin: "10px auto 0", display: "flex", alignItems: "center", justifyContent: "center", gap: 12, fontSize: 12, color: T.dim, flexWrap: "wrap" }}>
+        <span>Versión <strong style={{ color: T.text }}>{__APP_VERSION__}</strong> · {__APP_BUILD_DATE__}</span>
         {!updateReady && (
-          <button onClick={onCheckUpdate} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "none", border: "none", color: T.dim, textDecoration: "underline", fontSize: 11, cursor: "pointer", padding: 0 }}>
-            <RefreshCw size={11} /> Buscar actualizaciones
+          <button onClick={onCheckUpdate} style={{ ...ghostBtn, fontSize: 12, padding: "7px 12px" }}>
+            <RefreshCw size={13} /> Buscar actualizaciones
           </button>
         )}
       </div>
@@ -4883,8 +5008,10 @@ function ClockDial({ seconds, progress, running, half, size = 68 }) {
 // Mismo lenguaje visual que el marcador de goles (número oswald grande
 // flanqueado por Menos/Más, con el Más coloreado) porque es el gesto que ya
 // se usa a toda velocidad en pista -- práctico, sin reinventar nada nuevo.
-// Regla real: 4ª falta acumulada = aviso; desde la 5ª el rival ya tira
-// libre directo; desde la 6ª, encima, sin barrera (lanzamiento de 10M).
+// Regla real (FIFA): las 5 primeras faltas acumuladas de la parte se sancionan
+// como siempre; desde la 6ª el rival tira libre directo sin barrera desde 10 m.
+// Por eso la 4ª es aviso, la 5ª avisa de que la siguiente ya es 10M, y la 6ª y
+// siguientes llevan la marca 10M.
 function FoulsChip({ label, value, onInc, onDec }) {
   const danger = value >= 5;
   const doublePenalty = value >= 6;
@@ -4899,6 +5026,7 @@ function FoulsChip({ label, value, onInc, onDec }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
         <span style={{ fontSize: 9, fontWeight: 800, color: T.dim, textTransform: "uppercase", letterSpacing: 0.4, whiteSpace: "nowrap" }}>{label}</span>
         {doublePenalty && <span style={{ fontSize: 9, fontWeight: 800, color: T.red, whiteSpace: "nowrap" }}>10M</span>}
+        {value === 5 && <span style={{ fontSize: 9, fontWeight: 800, color: T.red, whiteSpace: "nowrap" }}>PRÓXIMA = 10M</span>}
       </div>
       <div className="oswald" style={{ fontSize: 22, fontWeight: 700, color: numColor, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "color 0.2s ease" }}>
         <button onClick={onDec} style={iconBtnSm}><Minus size={11} /></button>
@@ -5050,8 +5178,14 @@ function StatDrawer({ player, stats, canSave, onClose, onBump }) {
         </div>
         <div className="oswald" style={{ fontSize: 24, fontWeight: 700, color: T.red, margin: "12px 0 14px" }}>{fmtMin(stats.seconds)} <span style={{ fontSize: 12, color: T.dim, fontFamily: "Inter" }}>jugados</span></div>
 
+        {/* Goles y asistencias NO se tocan desde aqui: un gol sumado a mano sube el
+            marcador pero no deja fase, asistente, zona ni quinteto, y el resumen, la
+            tabla de fases y el informe no lo ven. Se anotan con el boton Gol. */}
+        <div style={{ fontSize: 11, color: T.dim, marginBottom: 10 }}>
+          Goles: <strong style={{ color: T.text }}>{stats.goals || 0}</strong> · Asistencias: <strong style={{ color: T.text }}>{stats.assists || 0}</strong> — se anotan con el botón <strong>Gol</strong>.
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          {STAT_DEFS.map((d) => (
+          {STAT_DEFS.filter((d) => d.key !== "goals" && d.key !== "assists").map((d) => (
             <StatButton key={d.key} def={d} value={stats[d.key] || 0} onInc={() => onBump(d.key, 1)} onDec={() => onBump(d.key, -1)} />
           ))}
           {/* Paradas: solo para quien puede pararlas — el portero de plantilla,

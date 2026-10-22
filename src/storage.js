@@ -156,6 +156,36 @@ storage.setMany = async function setMany(obj) {
   }
 };
 
+/* Importar una copia: o entra todo o no cambia nada. A diferencia de
+   setMany/clear, aqui NO hay plan B en memoria: si IndexedDB falla (sin
+   espacio, bloqueada...), la transaccion se aborta, los datos de antes siguen
+   intactos y el error llega a quien llama para poder avisar. Borrar y escribir
+   en dos pasos sueltos dejaba la base vacia si fallaba el segundo. */
+function writeAtomically(obj, { clearFirst }) {
+  return openDb().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const t = db.transaction(STORE, "readwrite");
+        const s = t.objectStore(STORE);
+        t.oncomplete = () => resolve(true);
+        t.onerror = () => reject(t.error || new Error("no se pudo escribir"));
+        t.onabort = () => reject(t.error || new Error("escritura cancelada"));
+        // Un put() que lanza (dato no clonable, transaccion inactiva...) NO
+        // cancela la transaccion por si solo: se confirmaria con el clear() y
+        // lo que se hubiera escrito hasta ahi. Hay que abortarla a mano.
+        try {
+          if (clearFirst) s.clear();
+          Object.entries(obj).forEach(([k, v]) => s.put(v, k));
+        } catch (e) {
+          try { t.abort(); } catch (e2) {}
+          reject(e);
+        }
+      })
+  );
+}
+storage.replaceAll = (obj) => writeAtomically(obj, { clearFirst: true });
+storage.putAll = (obj) => writeAtomically(obj, { clearFirst: false });
+
 storage.clear = async function clear() {
   try {
     await tx("readwrite", (s) => { s.clear(); });

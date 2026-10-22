@@ -1,14 +1,28 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import { execSync } from "node:child_process";
 
 // GitHub Pages sirve el sitio bajo https://USUARIO.github.io/NOMBRE-DEL-REPO/,
 // asi que todas las rutas tienen que colgar de ese subdirectorio. Si algun dia
 // se publica en un dominio propio, basta con BASE_PATH=/ al compilar.
 const base = process.env.BASE_PATH || "/npa-stats/";
 
+// Version visible en la app (Inicio): el commit con el que se compila y la
+// fecha. Sin esto no hay forma de saber que version corre en un movil o una
+// tablet concreta, y "no se me actualiza" no se puede ni confirmar ni descartar.
+const commit = (() => {
+  try { return execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim() || "dev"; }
+  catch (e) { return "dev"; }
+})();
+const buildDate = new Date().toISOString().slice(0, 10);
+
 export default defineConfig({
   base,
+  define: {
+    __APP_VERSION__: JSON.stringify(commit),
+    __APP_BUILD_DATE__: JSON.stringify(buildDate),
+  },
   plugins: [
     react(),
     VitePWA({

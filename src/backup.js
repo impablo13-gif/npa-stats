@@ -129,11 +129,16 @@ export function readBackupFile(file) {
  *    a los que ya hubiera.
  */
 export async function applyBackup(backup, mode) {
-  const datos = { ...(backup.datos || {}) };
+  // Aunque buildBackup nunca las incluye, un archivo ajeno podria traer
+  // borradores o el equipo activo de otro dispositivo: no se importan.
+  const datos = {};
+  Object.entries(backup.datos || {}).forEach(([k, v]) => {
+    if (!isTransientKey(k) && typeof v === "string") datos[k] = v;
+  });
 
   if (mode === "reemplazar") {
-    await storage.clear();
-    await storage.setMany(datos);
+    // Una sola transaccion: si falla a medias, no se pierde nada de lo que habia.
+    await storage.replaceAll(datos);
     return;
   }
 
@@ -148,5 +153,5 @@ export async function applyBackup(backup, mode) {
   const porId = new Map((Array.isArray(locales) ? locales : []).map((t) => [t.id, t]));
   (Array.isArray(entrantes) ? entrantes : []).forEach((t) => porId.set(t.id, t));
 
-  await storage.setMany({ ...datos, teams: JSON.stringify([...porId.values()]) });
+  await storage.putAll({ ...datos, teams: JSON.stringify([...porId.values()]) });
 }
