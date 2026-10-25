@@ -3001,6 +3001,18 @@ export default function App() {
     });
   };
 
+  // Alta desde la convocatoria: nombre, dorsal y posicion, sin foto. Entra en la
+  // plantilla (queda guardado para los proximos partidos) y devuelve el jugador
+  // para que la convocatoria lo marque como convocado al momento.
+  const addPlayerQuick = ({ name, number, position }) => {
+    const np = { id: `p${Date.now()}`, name, number, position, isGK: position === "POR", photo: null };
+    const next = [...players, np];
+    setPlayers(next);
+    setTrainingStats((s) => ({ ...s, [np.id]: { seconds: 0 } }));
+    persistRoster(next);
+    return np;
+  };
+
   // Quitar a alguien de la plantilla pide confirmacion: en el partido en curso
   // sus estadisticas dejan de contar al guardar (los partidos ya guardados no
   // se tocan, llevan sus propios nombres y datos).
@@ -3598,6 +3610,7 @@ export default function App() {
           initialSelected={convocados}
           mode={convocatoriaMode}
           onConfirm={(ids) => confirmConvocatoria(ids, convocatoriaMode)}
+          onAddPlayer={addPlayerQuick}
           onClose={() => setConvocatoriaMode(null)}
         />
       )}
@@ -4193,8 +4206,28 @@ function PitchZonePicker({ wizard, onPick, onClose }) {
   );
 }
 
-function ConvocatoriaModal({ players, initialSelected, mode, onConfirm, onClose }) {
+function ConvocatoriaModal({ players, initialSelected, mode, onConfirm, onClose, onAddPlayer }) {
   const [selected, setSelected] = useState(() => new Set(initialSelected || players.map((p) => p.id)));
+  // Alta rápida: un jugador que falta en la plantilla (fichaje de última hora,
+  // alguien de otro equipo que completa la convocatoria...) se crea aquí mismo,
+  // solo con nombre y dorsal; la foto, si se quiere, se pone luego en Plantilla.
+  const nextNumber = () => players.reduce((m, p) => Math.max(m, Number(p.number) || 0), 0) + 1;
+  const [newName, setNewName] = useState("");
+  const [newNumber, setNewNumber] = useState("");
+  const [newPos, setNewPos] = useState("ALA");
+  const [addError, setAddError] = useState(null);
+  const nameRef = useRef(null);
+  const listRef = useRef(null);
+  const addNew = () => {
+    const number = newNumber === "" ? nextNumber() : Math.round(Number(newNumber));
+    if (!Number.isFinite(number) || number < 0 || number > 99) { setAddError("El dorsal debe ser un número entre 0 y 99."); return; }
+    if (players.some((p) => Number(p.number) === number)) { setAddError(`El dorsal ${number} ya lo lleva otro jugador.`); return; }
+    const created = onAddPlayer({ name: newName.trim() || `Jugador ${number}`, number, position: newPos });
+    setSelected((prev) => new Set(prev).add(created.id));
+    setNewName(""); setNewNumber(""); setAddError(null);
+    if (nameRef.current) nameRef.current.focus();
+    setTimeout(() => { if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight; }, 0);
+  };
   const toggle = (id) => setSelected((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   const selectAll = () => setSelected(new Set(players.map((p) => p.id)));
   const selectNone = () => setSelected(new Set());
@@ -4220,7 +4253,29 @@ function ConvocatoriaModal({ players, initialSelected, mode, onConfirm, onClose 
           <span style={{ fontSize: 11, color: T.dim, alignSelf: "center" }}>{selected.size} convocados</span>
         </div>
 
-        <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
+        {onAddPlayer && (
+          <div style={{ background: T.surface2, border: `1px dashed ${T.line}`, borderRadius: 10, padding: 8, marginBottom: 10 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input
+                ref={nameRef} value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Nombre del jugador"
+                onKeyDown={(e) => { if (e.key === "Enter") addNew(); }}
+                style={{ flex: 1, minWidth: 0, background: T.surface, border: `1px solid ${T.line}`, borderRadius: 8, color: T.text, padding: "8px 10px" }}
+              />
+              <input
+                type="number" inputMode="numeric" value={newNumber} onChange={(e) => setNewNumber(e.target.value)} placeholder={String(nextNumber())}
+                onKeyDown={(e) => { if (e.key === "Enter") addNew(); }}
+                style={{ width: 58, background: T.surface, border: `1px solid ${T.line}`, borderRadius: 8, color: T.red, padding: "8px 4px", textAlign: "center", fontWeight: 700 }}
+              />
+              <select value={newPos} onChange={(e) => setNewPos(e.target.value)} style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 8, color: T.text, padding: "8px 4px" }}>
+                {POSITIONS.map((pos) => <option key={pos} value={pos}>{pos}</option>)}
+              </select>
+              <button onClick={addNew} style={{ ...bigBtn, background: T.red, color: "#0A0A0A", padding: "9px 12px", flexShrink: 0 }}><Plus size={15} /> Añadir</button>
+            </div>
+            {addError && <div style={{ fontSize: 11, color: T.negative, marginTop: 6 }}>{addError}</div>}
+          </div>
+        )}
+
+        <div ref={listRef} style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
           {players.map((p) => {
             const isIn = selected.has(p.id);
             return (
