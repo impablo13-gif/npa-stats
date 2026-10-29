@@ -1889,6 +1889,7 @@ export default function App() {
   const [halfUndo, setHalfUndo] = useState(null);
   // Tiempos muertos pedidos: { id, team: "for" | "against", half, remaining }.
   const [timeouts, setTimeouts] = useState([]);
+  const [undoStack, setUndoStack] = useState([]); // registros que "Deshacer" puede quitar, del más antiguo al más reciente
   // Cada entrada y salida de la pista de cada jugador, ya cerrada: quién,
   // en qué parte, desde qué marca del reloj hasta cuál. Lo abierto ahora
   // mismo vive aparte, en `stintsRef` (ver más abajo).
@@ -2468,6 +2469,7 @@ export default function App() {
     setTimeouts(Array.isArray(d.timeouts) ? d.timeouts : []);
     setShortHandedRestrictions(d.shortHandedRestrictions || []);
     setRivalShortHandedRestrictions(d.rivalShortHandedRestrictions || []);
+    setUndoStack([]);
     setLastGoalEvent(null);
     setLastEvent(null);
 
@@ -2742,40 +2744,46 @@ export default function App() {
       }
     }
     setLastEvent({ playerId, key, half: h, discId });
+    // Goles y asistencias entran en la pila por su propio flujo (el del gol).
+    if (key !== "goals" && key !== "assists") pushUndo({ kind: "action", playerId, key, half: h, discId });
   };
 
-  // Deshacer el último registro. El gol guarda su propio autor, así que
-  // deshacerlo resta el gol a quien tocaba aunque por medio haya pasado
-  // cualquier otra cosa — antes dependía de una referencia suelta que podía
-  // quedarse desincronizada y dejar el gol sin descontar.
+  // Deshacer en varios pasos: cada pulsación quita el registro anterior (gol,
+  // tarjeta, falta, tiro, pérdida, tiempo muerto...), del más reciente al más
+  // antiguo. La pila vive en memoria: tras recargar la app empieza vacía.
+  const pushUndo = (entry) => setUndoStack((prev) => [...prev.slice(-49), entry]);
+
+  // El gol guarda su propio autor, así que deshacerlo resta el gol a quien
+  // tocaba aunque por medio haya pasado cualquier otra cosa. Si el gol se
+  // editó después, se usa el autor actual y no el de cuando se anotó.
   const undoLast = () => {
-    if (lastGoalEvent) {
-      const ev = lastGoalEvent;
-      setGoalEvents((prev) => prev.filter((e) => e.id !== ev.id));
+    const entry = undoStack[undoStack.length - 1];
+    if (!entry) return;
+    setUndoStack((prev) => prev.slice(0, -1));
+    setLastEvent(null);
+    setLastGoalEvent(null);
+    if (entry.kind === "goal") {
+      const ev = goalEvents.find((e) => e.id === entry.id) || entry;
+      setGoalEvents((prev) => prev.filter((e) => e.id !== entry.id));
       if (ev.type === "for" && ev.authorId) {
         bump(ev.authorId, "goals", -1, ev.half);
         if (ev.assistId) bump(ev.assistId, "assists", -1, ev.half);
       } else if (ev.type === "against") setRivalScore((v) => Math.max(0, v - 1));
-      setLastGoalEvent(null);
-      setLastEvent(null);
       showToast("Gol deshecho");
       return;
     }
-    if (!lastEvent) return;
-    if (lastEvent.timeoutId) {
-      setTimeouts((prev) => prev.filter((t) => t.id !== lastEvent.timeoutId));
-      setLastEvent(null);
+    if (entry.kind === "timeout") {
+      setTimeouts((prev) => prev.filter((t) => t.id !== entry.id));
       showToast("Tiempo muerto deshecho");
       return;
     }
-    if (lastEvent.discId) {
-      setDisciplineEvents((prev) => prev.filter((e) => e.id !== lastEvent.discId));
+    if (entry.discId) {
+      setDisciplineEvents((prev) => prev.filter((e) => e.id !== entry.discId));
       // Una roja deshecha tambien deja de servirse: la inferioridad nace con el
       // mismo id que el evento de disciplina.
-      setShortHandedRestrictions((prev) => prev.filter((r) => r.id !== lastEvent.discId));
+      setShortHandedRestrictions((prev) => prev.filter((r) => r.id !== entry.discId));
     }
-    bump(lastEvent.playerId, lastEvent.key, -1, lastEvent.half);
-    setLastEvent(null);
+    bump(entry.playerId, entry.key, -1, entry.half);
     showToast("Acción deshecha");
   };
 
@@ -2837,6 +2845,7 @@ export default function App() {
     setGoalEvents((prev) => prev.filter((e) => e.id !== removed.id));
     setRivalScore((v) => Math.max(0, v - 1));
     if (lastGoalEvent && lastGoalEvent.id === removed.id) { setLastGoalEvent(null); setLastEvent(null); }
+    setUndoStack((prev) => prev.filter((e) => e.id !== removed.id));
     showToast("Gol rival quitado");
     saveDraftNow();
   };
@@ -2863,6 +2872,7 @@ export default function App() {
     };
     setGoalEvents((prev) => [...prev, event]);
     setLastGoalEvent({ id: event.id, type: event.type, authorId: event.authorId, assistId: event.assistId });
+    pushUndo({ kind: "goal", id: event.id, type: event.type, authorId: event.authorId, assistId: event.assistId, half: event.half });
 
     if (isFor) {
       if (wizard.authorId) bump(wizard.authorId, "goals", 1);
@@ -2978,6 +2988,7 @@ export default function App() {
     setTimeouts((prev) => [...prev, ev]);
     setLastGoalEvent(null);
     setLastEvent({ timeoutId: ev.id });
+    pushUndo({ kind: "timeout", id: ev.id });
     showToast(`Tiempo muerto ${team === "for" ? "nuestro" : "del rival"} · ${usedNow}º en esta parte — reloj parado`);
     saveDraftNow();
   };
@@ -3110,7 +3121,7 @@ export default function App() {
     setOnCourt(startingFive); onCourtRef.current = startingFive;
     openStintsForCourt(startingFive, 1);
     setLastEvent(null);
-    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null); setHalfUndo(null); setKeeperRedPrompt(false); setTimeouts([]);
+    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null); setHalfUndo(null); setKeeperRedPrompt(false); setTimeouts([]); setUndoStack([]);
     setShortHandedRestrictions([]);
     setRivalShortHandedRestrictions([]);
     setConvocados(null);
@@ -3153,7 +3164,7 @@ export default function App() {
     setOnCourt(startingFive); onCourtRef.current = startingFive;
     openStintsForCourt(startingFive, 1);
     setLastEvent(null);
-    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null); setHalfUndo(null); setKeeperRedPrompt(false); setTimeouts([]);
+    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null); setHalfUndo(null); setKeeperRedPrompt(false); setTimeouts([]); setUndoStack([]);
     setShortHandedRestrictions([]);
     setRivalShortHandedRestrictions([]);
     setConvocatoriaMode(null);
@@ -3271,7 +3282,7 @@ export default function App() {
     setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setTeamFouls({}); setRivalTeamFouls({});
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setLastEvent(null); setLastGoalEvent(null); setGoalEvents([]); setConvocados(null);
-    setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null); setHalfUndo(null); setKeeperRedPrompt(false); setTimeouts([]);
+    setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null); setHalfUndo(null); setKeeperRedPrompt(false); setTimeouts([]); setUndoStack([]);
     setChosenGoalkeeperId(null);
     setShortHandedRestrictions([]);
     setRivalShortHandedRestrictions([]);
@@ -3881,7 +3892,7 @@ export default function App() {
 
       {view === "partido" && (
         <QuickActionBar
-          hasLastEvent={!!lastEvent || !!lastGoalEvent}
+          hasLastEvent={undoStack.length > 0}
           onGoal={armGoal}
           onOpenActions={() => setActionsPopoverOpen(true)}
           onOpenCards={() => setCardsPopoverOpen(true)}
