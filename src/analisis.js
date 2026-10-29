@@ -69,28 +69,87 @@ export function goalsByMinute(matches, bucketMin = BUCKET_MIN) {
   return out;
 }
 
-/* Balance de goles por quinteto (grupo exacto de jugadores en pista al marcar). */
+/* Tramos de tiempo en los que un grupo exacto de jugadores estuvo en pista, a
+   partir de las rotaciones guardadas en el partido (quien entra y sale y en que
+   minuto del reloj de la app). El reloj se para en los parones, asi que son
+   minutos de juego efectivo, no de reloj de pared. Devuelve null si el partido
+   no guardo rotaciones (partidos anteriores a registrarlas). */
+export function onCourtSegments(match) {
+  const rots = match && match.rotations;
+  if (!Array.isArray(rots) || !rots.length) return null;
+  const baseLen = Number(match.halfLength) || 20;
+  const byHalf = new Map();
+  rots.forEach((r) => {
+    if (!r || r.playerId === undefined || r.playerId === null) return;
+    const half = Number(r.half) || 1;
+    const len = halfMinutes(half, baseLen) * 60;
+    const s = len - Number(r.startRemaining);
+    const e = len - Number(r.endRemaining);
+    if (!(e > s) || !isFinite(s) || !isFinite(e)) return;
+    if (!byHalf.has(half)) byHalf.set(half, []);
+    byHalf.get(half).push({ id: String(r.playerId), s, e, name: r.playerName, number: r.playerNumber });
+  });
+  const segments = [];
+  byHalf.forEach((intervals, half) => {
+    const points = [...new Set(intervals.flatMap((i) => [i.s, i.e]))].sort((a, b) => a - b);
+    for (let k = 0; k < points.length - 1; k += 1) {
+      const p0 = points[k], p1 = points[k + 1];
+      const on = intervals.filter((i) => i.s <= p0 && i.e >= p1);
+      if (!on.length) continue;
+      const ids = on.map((i) => i.id).sort();
+      segments.push({ half, from: p0, to: p1, seconds: p1 - p0, key: ids.join("|"), size: ids.length, players: on.map((i) => ({ key: i.id, name: i.name, number: i.number })) });
+    }
+  });
+  return segments;
+}
+
+export const QUINTET_RATE_MIN_SECONDS = 5 * 60; // por debajo, un ritmo por 40' engaña
+export const QUINTET_LOW_SAMPLE_SECONDS = 10 * 60;
+
+/* Balance por quinteto (grupo exacto de jugadores en pista).
+ *  - Goles: de la foto de los 5 en pista al marcarse, en todos los partidos.
+ *  - Minutos: de las rotaciones, solo en los partidos que las guardaron. Para
+ *    que el ritmo sea honesto, el +/- por 40' usa SOLO los goles de esos mismos
+ *    partidos (timedFavor/timedContra), nunca goles de partidos sin minutos.
+ * Ordenado por minutos jugados y, a igualdad, por goles. */
 export function quintetBalance(matches) {
   const map = new Map();
+  const get = (key, size, players) => {
+    if (!map.has(key)) {
+      map.set(key, {
+        key, size, favor: 0, contra: 0, seconds: 0, timedFavor: 0, timedContra: 0,
+        players: players.map((p) => ({ key: p.key, name: p.name, number: p.number })).sort((a, b) => (Number(a.number) || 999) - (Number(b.number) || 999)),
+      });
+    }
+    return map.get(key);
+  };
+  let timedMatches = 0;
   (matches || []).forEach((m) => {
+    const segs = onCourtSegments(m);
+    if (segs && segs.length) timedMatches += 1;
+    (segs || []).forEach((sg) => { get(sg.key, sg.size, sg.players).seconds += sg.seconds; });
     (m.goalEvents || []).forEach((ev) => {
       const oc = ev.onCourt || [];
       if (!oc.length || (ev.type !== "for" && ev.type !== "against")) return;
-      const keys = oc.map(rowKey).sort();
-      const key = keys.join("|");
-      if (!map.has(key)) {
-        map.set(key, {
-          key, size: oc.length, favor: 0, contra: 0,
-          players: oc.map((p) => ({ key: rowKey(p), name: p.name, number: p.number })).sort((a, b) => (Number(a.number) || 999) - (Number(b.number) || 999)),
-        });
-      }
-      const d = map.get(key);
+      const key = oc.map(rowKey).sort().join("|");
+      const d = get(key, oc.length, oc.map((p) => ({ key: rowKey(p), name: p.name, number: p.number })));
       if (ev.type === "for") d.favor += 1; else d.contra += 1;
+      if (segs && segs.length) { if (ev.type === "for") d.timedFavor += 1; else d.timedContra += 1; }
     });
   });
-  return [...map.values()]
-    .map((q) => ({ ...q, goals: q.favor + q.contra, diff: q.favor - q.contra, lowSample: q.favor + q.contra < QUINTET_LOW_SAMPLE }))
-    .sort((a, b) => b.goals - a.goals || b.diff - a.diff);
+  const list = [...map.values()].map((q) => {
+    const goals = q.favor + q.contra;
+    const rateOk = q.seconds >= QUINTET_RATE_MIN_SECONDS;
+    return {
+      ...q, goals, diff: q.favor - q.contra,
+      per40: rateOk ? ((q.timedFavor - q.timedContra) * 40 * 60) / q.seconds : null,
+      lowSample: goals < QUINTET_LOW_SAMPLE || (q.seconds > 0 && q.seconds < QUINTET_LOW_SAMPLE_SECONDS),
+    };
+  }).filter((q) => q.goals > 0 || q.seconds >= 3 * 60); // un quinteto sin goles solo interesa si jugo un rato
+  list.sort((a, b) => b.seconds - a.seconds || b.goals - a.goals || b.diff - a.diff);
+  list.timedMatches = timedMatches;
+  list.totalMatches = (matches || []).length;
+  return list;
 }
 
 /* Goles a favor y en contra por fase (ABP, ataque posicional...). */
