@@ -2599,6 +2599,7 @@ export default function App() {
       setOnCourt((prev) => prev.filter((x) => x !== id));
       return;
     }
+    if (sentOffIds.has(id)) { showToast("Expulsado: no puede volver a jugar este partido"); return; }
     if (onCourt.length >= maxOnCourt) { showToast(`Ya hay ${maxOnCourt} en pista — saca a alguien primero`); return; }
     if (wouldDoubleGoalkeeper(id)) { showToast("Ya hay un portero en pista"); return; }
     openStint(id, halfRef.current);
@@ -2658,6 +2659,7 @@ export default function App() {
   const doSubstitution = (outgoingId) => {
     if (!subPickerFor) return;
     const incoming = subPickerFor;
+    if (sentOffIds.has(incoming.id)) { showToast("Expulsado: no puede volver a jugar este partido"); setSubPickerFor(null); return; }
     if (outgoingId !== keeperOnCourtId && wouldDoubleGoalkeeper(incoming.id, [outgoingId])) {
       showToast("Ya hay un portero en pista");
       return;
@@ -3791,7 +3793,7 @@ export default function App() {
       {goalkeeperSwapFor && (
         <GoalkeeperSwapModal
           outgoing={goalkeeperSwapFor}
-          benchPlayers={players.filter((p) => !onCourt.includes(p.id) && (!convocados || convocados.includes(p.id)))}
+          benchPlayers={players.filter((p) => !onCourt.includes(p.id) && !sentOffIds.has(p.id) && (!convocados || convocados.includes(p.id)))}
           stats={stats}
           onPick={doGoalkeeperSwap}
           onClose={() => setGoalkeeperSwapFor(null)}
@@ -3803,9 +3805,28 @@ export default function App() {
           <div style={{ ...modalCard, maxWidth: 460 }} onClick={(e) => e.stopPropagation()} className="fadein">
             <div className="oswald" style={{ fontSize: 17, fontWeight: 600, marginBottom: 4 }}>🟥 Portero expulsado</div>
             <div style={{ fontSize: 12, color: T.dim, lineHeight: 1.5, marginBottom: 12 }}>
-              Os quedáis sin portero en pista. Elige quién se pone de portero entre los que siguen en la pista.
-              Si prefieres meter al portero suplente, ciérralo y cámbialo desde el banquillo: entrará como portero.
+              Es una expulsión normal: jugáis con uno menos 2 minutos de juego o hasta que os marquen, y el expulsado no puede volver a jugar este partido.
+              Podéis meter al portero suplente (sale un jugador de pista) o poner de portero a uno de los que siguen en pista.
             </div>
+            {(() => {
+              const benchKeepers = players.filter((p) => (p.isGK || p.position === "POR") && !onCourt.includes(p.id) && !sentOffIds.has(p.id) && (!convocados || convocados.includes(p.id)));
+              return (
+                <>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Meter al portero suplente</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                    {benchKeepers.length === 0 && <div style={{ fontSize: 12, color: T.dim }}>No hay otro portero convocado en el banquillo.</div>}
+                    {benchKeepers.map((p) => (
+                      <button key={p.id} onClick={() => { setKeeperRedPrompt(false); setSubPickerFor(p); }} style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(44,95,168,0.18)", border: `1.5px solid ${T.gk}`, borderRadius: 10, padding: "9px 12px", cursor: "pointer", textAlign: "left" }}>
+                        <Avatar player={p} size={30} />
+                        <span style={{ fontSize: 14, fontWeight: 600, flex: 1, color: T.text }}>{p.name} entra de portero — elegir quién sale</span>
+                        <span className="oswald" style={{ fontSize: 16, fontWeight: 700, color: T.red }}>{p.number}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>O poner de portero a uno de pista</div>
+                </>
+              );
+            })()}
             <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
               {players.filter((p) => onCourt.includes(p.id)).map((p) => (
                 <button key={p.id} onClick={() => { setChosenGoalkeeperId(p.id); setKeeperRedPrompt(false); showToast(`${p.name} se pone de portero-jugador`); saveDraftNow(); }} style={{ display: "flex", alignItems: "center", gap: 10, background: T.surface2, border: `1.5px solid ${T.line}`, borderRadius: 10, padding: "9px 12px", cursor: "pointer", textAlign: "left" }}>
