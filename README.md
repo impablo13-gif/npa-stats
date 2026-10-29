@@ -302,7 +302,7 @@ Con menos de 15 registros avisa de que es solo orientación.
 
 **Historial → Análisis** reúne, para el periodo elegido (temporada, últimos 3 o 5
 partidos o uno solo): resumen y resultados (puntos 3-1-0), goles por fase,
-**goles por minuto** (tramos de 5' de cada parte, más los primeros y últimos 5'),
+**goles por minuto** (tramos de 2, 3, 5 o 10 minutos a elegir, de cada parte, más los primeros y últimos 5'),
 jugadores con más minutos y **quintetos con más goles**. Se ve en pantalla y se
 baja en PDF con **Descargar memoria**; las conclusiones del entrenador se guardan
 solas y salen en el PDF.

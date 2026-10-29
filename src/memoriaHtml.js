@@ -118,7 +118,7 @@ export function buildSeasonReportHtml(opts) {
     </div>
 
     <div data-pdf-block style="${CARD}">
-      <div style="${H}">Goles por minuto <span style="font-weight:600; text-transform:none; letter-spacing:0;">(<span style="color:${PAL.favor};">a favor</span> · <span style="color:${PAL.contra};">en contra</span>, tramos de 5')</span></div>
+      <div style="${H}">Goles por minuto <span style="font-weight:600; text-transform:none; letter-spacing:0;">(<span style="color:${PAL.favor};">a favor</span> · <span style="color:${PAL.contra};">en contra</span>, tramos de ${minutes.bucketMin || 5}')</span></div>
       <div style="display:flex; gap:18px; flex-wrap:wrap;">${minuteBlock}</div>
       <div style="font-size:11.5px; line-height:1.5; margin-top:10px;">
         <strong>Primeros 5' de cada parte:</strong> <span style="color:${PAL.favor}; font-weight:700;">${minutes.first5.favor}</span> a favor · <span style="color:${PAL.contra}; font-weight:700;">${minutes.first5.contra}</span> en contra.

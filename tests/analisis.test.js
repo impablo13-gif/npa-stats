@@ -84,3 +84,38 @@ test("goles por fase", () => {
   const m = goalsByPhase([m1]);
   assert.deepEqual(m.get("ABP"), { phase: "ABP", favor: 3, contra: 1 });
 });
+
+test("tamaño de tramo: 2, 3, 5 y 10 minutos", () => {
+  const total = (r) => r.rows.reduce((s, x) => s + x.favor + x.contra, 0);
+  for (const size of [2, 3, 5, 10]) {
+    const r = goalsByMinute([m1], size);
+    assert.equal(r.bucketMin, size);
+    assert.equal(r.rows.length, 2 * Math.ceil(20 / size), `${size} min`);
+    assert.equal(total(r), 4, `${size} min conserva todos los goles`);
+    assert.deepEqual(r.total, { favor: 3, contra: 1 });
+  }
+});
+
+test("tramos de 3 min: el ultimo es mas corto y recoge el minuto 20", () => {
+  const r = goalsByMinute([m1], 3);
+  const last = r.rows.filter((x) => x.half === 2).pop();
+  assert.deepEqual([last.from, last.to], [18, 20]);
+  assert.equal(last.favor, 1); // el autogol del minuto 20
+  assert.equal(last.contra, 0);
+  assert.equal(r.rows.find((x) => x.half === 2 && x.from === 15).contra, 1); // 16:40 cae en 15-18
+});
+
+test("tramos de 10 min y de 2 min colocan los goles donde toca", () => {
+  const r10 = goalsByMinute([m1], 10);
+  const c = (half, from) => r10.rows.find((x) => x.half === half && x.from === from);
+  assert.equal(c(1, 0).favor, 1); // 10 s jugados
+  assert.equal(c(1, 10).favor, 1); // 10:00 exactos cae en 10-20
+  const r2 = goalsByMinute([m1], 2);
+  assert.equal(r2.rows.find((x) => x.half === 1 && x.from === 0).favor, 1);
+});
+
+test("un tamaño no permitido vuelve al de 5 y los bordes de 5' no cambian con el tramo", () => {
+  assert.equal(goalsByMinute([m1], 7).bucketMin, 5);
+  assert.deepEqual(goalsByMinute([m1], 10).first5, goalsByMinute([m1], 2).first5);
+  assert.deepEqual(goalsByMinute([m1], 10).last5, goalsByMinute([m1], 2).last5);
+});
