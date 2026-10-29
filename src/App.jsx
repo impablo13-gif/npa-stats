@@ -1853,6 +1853,24 @@ const isStandaloneApp = () => {
   } catch (e) { return false; }
 };
 
+/* true en pantallas de movil (< 600 px). Se usa para compactar la pantalla de
+   partido: en 390 px la cabecera ocupaba ~660 px y la primera tarjeta de
+   jugador quedaba fuera de la pantalla. La tablet no cambia. */
+function useIsNarrow(maxWidth = 600) {
+  const query = `(max-width: ${maxWidth}px)`;
+  const read = () => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(query).matches;
+  const [narrow, setNarrow] = useState(read);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return undefined;
+    const mq = window.matchMedia(query);
+    const onChange = () => setNarrow(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [query]);
+  return narrow;
+}
+
 export default function App() {
   const [view, setView] = useState("inicio");
   const [loading, setLoading] = useState(true);
@@ -1930,6 +1948,7 @@ export default function App() {
   const [zonedActionWizard, setZonedActionWizard] = useState(null);
   const [zonedEvents, setZonedEvents] = useState([]); // cada una con jugador, zona y minuto
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const narrow = useIsNarrow();
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [cropTarget, setCropTarget] = useState(null); // { kind: 'player'|'teamCrest'|'rivalCrest', id, src }
   const [pendingDrafts, setPendingDrafts] = useState(null); // { match?, training? } sesiones sin cerrar encontradas al abrir
@@ -3275,7 +3294,7 @@ export default function App() {
       {view !== "inicio" && (
         <>
           {/* HEADER */}
-          <div style={{ background: T.surface, borderBottom: `1px solid ${T.line}`, padding: "14px 16px" }}>
+          <div style={{ background: T.surface, borderBottom: `1px solid ${T.line}`, padding: narrow ? "8px 12px 10px" : "14px 16px" }}>
             {view === "entrenamiento" ? (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => setView("inicio")}>
@@ -3313,7 +3332,9 @@ export default function App() {
               </div>
             </div>
             )}
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
+            <div style={{ display: "flex", alignItems: narrow ? "center" : "flex-start", justifyContent: narrow ? "space-around" : "space-between", flexWrap: "wrap", gap: narrow ? 8 : 14 }}>
+              {/* En movil el nombre del equipo ya sale sobre su escudo en el marcador: se ahorra una fila. */}
+              {!narrow && (
               <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => setView("inicio")}>
                 <CrestAvatar crest={activeTeam.crest} size={40} onPick={(f) => handleTeamCrestFile(activeTeamId, f)} onReframe={() => handleTeamCrestReframe(activeTeamId, activeTeam.crest)} onRemove={() => handleTeamCrestRemove(activeTeamId)} />
                 <div>
@@ -3321,9 +3342,10 @@ export default function App() {
                   <div style={{ fontSize: 9, color: T.dim, letterSpacing: 1 }}>{activeTeam.subtitle}</div>
                 </div>
               </div>
+              )}
 
               {/* score — two symmetric columns so both crests sit at the exact same height */}
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 14, ...(narrow ? { flex: "1 1 100%", justifyContent: "center" } : {}) }}>
                 <ScoreColumn
                   labelNode={<div style={{ fontSize: 9, color: T.dim, height: 12, overflow: "hidden", whiteSpace: "nowrap", textAlign: "center" }}>{(activeTeam.name || "").split(" ")[0] || "Equipo"}</div>}
                   crest={<CrestAvatar crest={activeTeam.crest} size={32} onPick={(f) => handleTeamCrestFile(activeTeamId, f)} onReframe={() => handleTeamCrestReframe(activeTeamId, activeTeam.crest)} onRemove={() => handleTeamCrestRemove(activeTeamId)} />}
@@ -3347,7 +3369,7 @@ export default function App() {
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                <ClockDial seconds={remaining} progress={halfProgress} running={running} half={half} size={96} />
+                <ClockDial seconds={remaining} progress={halfProgress} running={running} half={half} size={narrow ? 76 : 96} />
                 {(activeShortHanded.length > 0 || activeRivalShortHanded.length > 0) && (
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "center" }}>
                     {activeShortHanded.map((r) => (
@@ -3364,8 +3386,8 @@ export default function App() {
                 )}
               </div>
 
-              <button onClick={() => { const next = !running; setClockRunning(next); if (next && !matchStartTime) setMatchStartTime(new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })); }} style={{ ...bigBtn, background: running ? T.negative : T.red, color: "#0A0A0A", fontSize: 24, fontWeight: 700, padding: "24px 40px", borderRadius: 16, gap: 12 }}>
-                {running ? <Pause size={32} /> : <Play size={32} />} {running ? "Pausar" : "Iniciar"}
+              <button onClick={() => { const next = !running; setClockRunning(next); if (next && !matchStartTime) setMatchStartTime(new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })); }} style={{ ...bigBtn, background: running ? T.negative : T.red, color: "#0A0A0A", fontSize: narrow ? 20 : 24, fontWeight: 700, padding: narrow ? "18px 26px" : "24px 40px", borderRadius: 16, gap: 12 }}>
+                {running ? <Pause size={narrow ? 24 : 32} /> : <Play size={narrow ? 24 : 32} />} {running ? "Pausar" : "Iniciar"}
               </button>
             </div>
             </>
@@ -3386,8 +3408,8 @@ export default function App() {
               {view === "partido" && (
                 <button onClick={armRivalExpulsion} style={{ ...ghostBtn, borderColor: T.negative, color: T.negative }}><AlertTriangle size={13} /> Expulsión rival</button>
               )}
-              <div style={{ width: 1, height: 26, background: T.line }} />
-              <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 280 }}>
+              {!narrow && <div style={{ width: 1, height: 26, background: T.line }} />}
+              <div style={{ display: "flex", gap: 8, flex: narrow ? "1 1 100%" : 1, minWidth: narrow ? 0 : 280 }}>
                 <FoulsChip label="Faltas" value={currentTeamFouls} onInc={() => setTeamFouls((v) => ({ ...v, [half]: (v[half] || 0) + 1 }))} onDec={() => setTeamFouls((v) => ({ ...v, [half]: Math.max(0, (v[half] || 0) - 1) }))} />
                 <FoulsChip label="Rival" value={currentRivalTeamFouls} onInc={() => setRivalTeamFouls((v) => ({ ...v, [half]: (v[half] || 0) + 1 }))} onDec={() => setRivalTeamFouls((v) => ({ ...v, [half]: Math.max(0, (v[half] || 0) - 1) }))} />
               </div>
@@ -3500,7 +3522,7 @@ export default function App() {
               </div>
             )}
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: narrow ? "repeat(2, minmax(0, 1fr))" : "repeat(auto-fill, minmax(210px, 1fr))", gap: narrow ? 8 : 10 }}>
               {sortedPlayers.filter((p) => (!convocados || convocados.includes(p.id)) && !sentOffIds.has(p.id)).map((p) => {
                 const isOn = onCourt.includes(p.id);
                 // El acumulado de la parte SIGUE sumando por debajo cada
@@ -3519,7 +3541,7 @@ export default function App() {
                   <PlayerCard
                     key={p.id} player={p} stats={stats[p.id] || emptyStats()} onCourt={isOn}
                     accumulatedSeconds={accumulatedSeconds} stintSeconds={stintSeconds}
-                    isKeeperCard={isKeeperCard} isActingKeeper={isKeeperCard && isActingKeeper}
+                    isKeeperCard={isKeeperCard} isActingKeeper={isKeeperCard && isActingKeeper} compact={narrow}
                     armed={!!pendingAction || !!(goalWizard && goalWizard.type === "for" && !goalWizard.authorId) || !!(zonedActionWizard && !zonedActionWizard.playerId)}
                     onTap={() => handlePlayerTap(p)}
                     onOpenStats={() => setStatPlayer(p.id)}
@@ -3751,6 +3773,7 @@ export default function App() {
           onOpenSummary={() => setSummaryOpen(true)}
           onUndo={undoLast}
           onFinish={() => setConfirmEnd(true)}
+          compact={narrow}
         />
       )}
 
@@ -4026,16 +4049,18 @@ function DraftRecoveryModal({ drafts, teamName, onResumeMatch, onDiscardMatch, o
 }
 
 /* Bottom quick-action bar for the Partido tab: tap an action, then tap a player to record it. */
-function QuickActionBar({ hasLastEvent, onGoal, onOpenActions, onOpenCards, onOpenSummary, onUndo, onFinish }) {
+function QuickActionBar({ hasLastEvent, onGoal, onOpenActions, onOpenCards, onOpenSummary, onUndo, onFinish, compact = false }) {
+  // En movil los 6 controles caben en UNA fila (antes saltaban a dos y la barra
+  // fija se comia ~175 px de una pantalla de 844).
   return (
-    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 80, background: T.surface, borderTop: `1px solid ${T.line}`, padding: `10px 14px calc(10px + env(safe-area-inset-bottom, 0px))`, boxShadow: "0 -8px 24px rgba(0,0,0,0.35)" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 20, maxWidth: 700, margin: "0 auto", flexWrap: "wrap" }}>
-        <QuickActionButton icon={() => <span style={{ fontSize: 20 }}>⚽</span>} label="Gol" onClick={onGoal} accent={T.red} />
-        <QuickActionButton icon={ClipboardList} label="Resumen" onClick={onOpenSummary} />
-        <QuickActionButton icon={Footprints} label="Acciones" onClick={onOpenActions} />
-        <QuickActionButton icon={(p) => <Square {...p} />} label="Tarjeta" onClick={onOpenCards} accent={T.amber} />
-        <QuickActionButton icon={Undo2} label="Deshacer" onClick={onUndo} disabled={!hasLastEvent} />
-        <button onClick={onFinish} style={{ ...bigBtn, background: T.white, color: T.bg, padding: "12px 18px", marginLeft: 8 }}>
+    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 80, background: T.surface, borderTop: `1px solid ${T.line}`, padding: `${compact ? 6 : 10}px ${compact ? 8 : 14}px calc(${compact ? 6 : 10}px + env(safe-area-inset-bottom, 0px))`, boxShadow: "0 -8px 24px rgba(0,0,0,0.35)" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: compact ? "space-between" : "center", gap: compact ? 2 : 20, maxWidth: 700, margin: "0 auto", flexWrap: compact ? "nowrap" : "wrap" }}>
+        <QuickActionButton compact={compact} icon={() => <span style={{ fontSize: 20 }}>⚽</span>} label="Gol" onClick={onGoal} accent={T.red} />
+        <QuickActionButton compact={compact} icon={ClipboardList} label="Resumen" onClick={onOpenSummary} />
+        <QuickActionButton compact={compact} icon={Footprints} label="Acciones" onClick={onOpenActions} />
+        <QuickActionButton compact={compact} icon={(p) => <Square {...p} />} label="Tarjeta" onClick={onOpenCards} accent={T.amber} />
+        <QuickActionButton compact={compact} icon={Undo2} label="Deshacer" onClick={onUndo} disabled={!hasLastEvent} />
+        <button onClick={onFinish} style={{ ...bigBtn, background: T.white, color: T.bg, padding: compact ? "12px 11px" : "12px 18px", marginLeft: compact ? 2 : 8, fontSize: compact ? 12 : 13, flexShrink: 0 }}>
           <Save size={16} /> Finalizar
         </button>
       </div>
@@ -4043,9 +4068,9 @@ function QuickActionBar({ hasLastEvent, onGoal, onOpenActions, onOpenCards, onOp
   );
 }
 
-function QuickActionButton({ icon: Icon, label, onClick, accent, disabled }) {
+function QuickActionButton({ icon: Icon, label, onClick, accent, disabled, compact = false }) {
   return (
-    <button onClick={onClick} disabled={disabled} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: "none", border: "none", cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.4 : 1, padding: "4px 6px" }}>
+    <button onClick={onClick} disabled={disabled} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: "none", border: "none", cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.4 : 1, padding: compact ? "2px 1px" : "4px 6px", minWidth: 0 }}>
       <div style={{ width: 46, height: 46, borderRadius: "50%", background: T.surface3, display: "flex", alignItems: "center", justifyContent: "center", border: `1.5px solid ${accent || T.line}` }}>
         <Icon size={20} color={accent || T.text} />
       </div>
@@ -5116,7 +5141,7 @@ function TabBtn({ active, onClick, icon: Icon, label }) {
   );
 }
 
-function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, isKeeperCard, isActingKeeper, armed, onTap, onOpenStats }) {
+function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, isKeeperCard, isActingKeeper, armed, onTap, onOpenStats, compact = false }) {
   const hasBadges = stats.goals > 0 || stats.yellow > 0 || stats.red > 0 || stats.fouls > 0 || stats.saves > 0;
   // El portero (o portero-jugador) en pista lleva fondo propio, distinto del
   // rojo del resto — así se distingue a simple vista sin tener que leer nada.
@@ -5135,15 +5160,15 @@ function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, 
       className={`tap-target${armed ? " armable" : ""}`}
       style={{
         background: cardBg,
-        border: `3px solid ${borderTint}`,
-        boxShadow: onCourt ? `0 0 0 3px rgba(${glowColor},0.35), 0 6px 18px rgba(${glowColor},0.45)` : "none",
-        borderRadius: 14, padding: 12, cursor: "pointer",
+        border: `${compact ? 2 : 3}px solid ${borderTint}`,
+        boxShadow: onCourt ? `0 0 0 ${compact ? 2 : 3}px rgba(${glowColor},0.35), 0 6px 18px rgba(${glowColor},0.45)` : "none",
+        borderRadius: 14, padding: compact ? 8 : 12, cursor: "pointer", minWidth: 0,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <Avatar player={player} size={56} />
+      <div style={{ display: "flex", alignItems: "center", gap: compact ? 6 : 10 }}>
+        <Avatar player={player} size={compact ? 36 : 56} />
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: fgColor }}>{player.name}</div>
+          <div style={{ fontSize: compact ? 12 : 14, fontWeight: 700, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: fgColor }}>{player.name}</div>
           {/* El portero va anclado: no sale con un toque normal, así que esta
               etiqueta recuerda por qué su tarjeta se ve distinta y avisa
               cuando quien está parando no es el portero de plantilla. */}
@@ -5153,7 +5178,7 @@ function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, 
             </div>
           )}
         </div>
-        <div className="oswald" style={{ fontSize: 34, fontWeight: 700, color: jerseyColor, lineHeight: 1, flexShrink: 0 }}>{player.number}</div>
+        <div className="oswald" style={{ fontSize: compact ? 26 : 34, fontWeight: 700, color: jerseyColor, lineHeight: 1, flexShrink: 0 }}>{player.number}</div>
       </div>
 
       {/* El tiempo de ESTA tanda en pista: solo existe mientras el jugador
@@ -5162,7 +5187,7 @@ function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, 
           grande, y en blanco para que se distinga del acumulado de más abajo
           a simple vista. */}
       {onCourt && (
-        <div className="oswald" style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: T.white, marginTop: 8 }}>
+        <div className="oswald" style={{ fontSize: compact ? 34 : 42, fontWeight: 700, lineHeight: 1, color: T.white, marginTop: compact ? 4 : 8 }}>
           {fmtMin(stintSeconds)}
         </div>
       )}
@@ -5173,12 +5198,12 @@ function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, 
           el jugador está en pista se queda congelado en lo que ya llevaba
           antes de esta tanda, y en cuanto sale salta de golpe a incluirla, en
           el mismo instante de la sustitución. */}
-      <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginTop: onCourt ? 14 : 6 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginTop: onCourt ? (compact ? 6 : 14) : 6 }}>
         <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.3, color: accumColor }}>Parte</span>
         <span className="oswald" style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.1, color: accumColor }}>{fmtMin(accumulatedSeconds)}</span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6, gap: 6, minHeight: 22 }}>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: compact ? 4 : 6, gap: 6, minHeight: 22 }}>
+        <div style={{ display: "flex", gap: compact ? 3 : 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
           {hasBadges && (
             <>
               {stats.goals > 0 && <MiniBadge color={fgColor}>⚽ {stats.goals}</MiniBadge>}
