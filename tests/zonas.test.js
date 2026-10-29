@@ -155,3 +155,10 @@ test("el CSV lleva la clave de zona y la resolucion con la que se registro", () 
   assert.equal(isFineKey("f1-izq"), true);
   assert.equal(isFineKey("def-izq"), false);
 });
+
+test("un autogol del rival (gol a favor sin autor ni zona) no cuenta como accion sin zona", () => {
+  const m = { date: "2026-10-01T18:00:00.000Z", rivalName: "Lugo", goalEvents: [{ type: "for", ownGoal: true, authorId: null, zone: null, half: 1, onCourt: [] }] };
+  const { events, withoutZone } = collectZoneEvents([m]);
+  assert.equal(events.length, 0);
+  assert.equal(withoutZone, 0);
+});

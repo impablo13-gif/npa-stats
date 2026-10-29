@@ -277,6 +277,26 @@ contiene). El informe PDF sigue dibujando el campo en 9 zonas. Lo que no se anot
 no sale en el mapa y la pantalla avisa de cuántas acciones se quedan fuera.
 Con menos de 15 registros avisa de que es solo orientación.
 
+### Partido en directo: deshacer, tiempos muertos y casos especiales
+
+- **Deshacer** quita los registros uno a uno, del último al primero (goles,
+  tarjetas, faltas, tiros, pérdidas, paradas, tiempos muertos). La pila vive en
+  memoria: tras recargar la app empieza vacía.
+- **Deshacer «Empezar 2ª parte»**: tras pulsarlo aparece «Deshacer: volver a la
+  1ª parte (mm:ss)», que devuelve el reloj al minuto exacto en que estaba y
+  restaura rotaciones y minutos. Solo se ofrece mientras en la parte nueva no se
+  haya anotado nada.
+- **Autogol del rival**: al pedir «¿Quién marcó?» hay un botón que anota un gol a
+  favor sin autor (suma al marcador, no es de ningún jugador).
+- **Portero expulsado**: al sacarle roja al portero en pista, un aviso deja elegir
+  quién se pone de portero entre los que siguen en pista; al suplente se le mete
+  desde el banquillo y entra como portero.
+- **Tiempos muertos**: botones «T.M. nuestro» y «T.M. rival»; paran el reloj y se
+  anotan con parte y minuto (se ven en la ficha del partido). No se bloquea por
+  cuántos lleve cada equipo porque el reglamento de cada competición varía.
+- En pantallas de móvil (menos de 600 px) la pantalla de partido se compacta:
+  cabecera más baja, jugadores en 2 columnas y barra inferior en una fila.
+
 ### Fichas de jugador
 
 En **Historial → Jugadores** hay una tabla de la plantilla con los totales del

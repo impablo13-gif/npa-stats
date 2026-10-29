@@ -331,7 +331,7 @@ const goalRowsOf = (match) => (match.goalEvents || []).map((ev) => ({
   Parte: ev.half,
   "Tiempo restante": fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds),
   Tipo: ev.type === "for" ? "A favor" : "En contra",
-  Autor: ev.authorName || "",
+  Autor: ev.authorName || (ev.ownGoal ? "Autogol del rival" : ""),
   Fase: ev.phase,
   "Jugadores en pista": (ev.onCourt || []).map((p) => `#${p.number} ${p.name}`).join(", "),
 }));
@@ -950,7 +950,7 @@ function buildMatchReportHtml(rawMatch, teamName, rosterPlayers, teamCrest) {
           }).join("")}
         </div>
         <div style="font-size:10px; margin-top:7px; font-weight:700; color:${isFor ? PAL.favor : PAL.contra};">
-          ⚽ ${isFor ? esc(ev.authorName || "") : "Gol del rival"}
+          ⚽ ${isFor ? esc(ev.authorName || (ev.ownGoal ? "Autogol del rival" : "")) : "Gol del rival"}
           ${isFor && ev.assistName ? `<span style="font-weight:600; color:${PAL.blue};"> · 🅰 ${esc(ev.assistName)}</span>` : ""}
         </div>
       </div>`;
@@ -1853,6 +1853,24 @@ const isStandaloneApp = () => {
   } catch (e) { return false; }
 };
 
+/* true en pantallas de movil (< 600 px). Se usa para compactar la pantalla de
+   partido: en 390 px la cabecera ocupaba ~660 px y la primera tarjeta de
+   jugador quedaba fuera de la pantalla. La tablet no cambia. */
+function useIsNarrow(maxWidth = 600) {
+  const query = `(max-width: ${maxWidth}px)`;
+  const read = () => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(query).matches;
+  const [narrow, setNarrow] = useState(read);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return undefined;
+    const mq = window.matchMedia(query);
+    const onChange = () => setNarrow(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [query]);
+  return narrow;
+}
+
 export default function App() {
   const [view, setView] = useState("inicio");
   const [loading, setLoading] = useState(true);
@@ -1866,6 +1884,12 @@ export default function App() {
   // { 1: { jugadorId: stats }, 2: { ... } }. El total del partido se calcula
   // sumando las partes, mas abajo.
   const [statsByHalf, setStatsByHalf] = useState({});
+  // Foto del partido justo antes de pulsar "Empezar 2ª parte" (o prórroga), para
+  // poder deshacerlo si se pulsó sin querer. Solo en memoria.
+  const [halfUndo, setHalfUndo] = useState(null);
+  // Tiempos muertos pedidos: { id, team: "for" | "against", half, remaining }.
+  const [timeouts, setTimeouts] = useState([]);
+  const [undoStack, setUndoStack] = useState([]); // registros que "Deshacer" puede quitar, del más antiguo al más reciente
   // Cada entrada y salida de la pista de cada jugador, ya cerrada: quién,
   // en qué parte, desde qué marca del reloj hasta cuál. Lo abierto ahora
   // mismo vive aparte, en `stintsRef` (ver más abajo).
@@ -1901,6 +1925,7 @@ export default function App() {
   const [cardsPopoverOpen, setCardsPopoverOpen] = useState(false);
   const [subPickerFor, setSubPickerFor] = useState(null); // bench player object awaiting a substitution choice
   const [goalkeeperSwapFor, setGoalkeeperSwapFor] = useState(null); // portero en pista esperando a quien lo releva
+  const [keeperRedPrompt, setKeeperRedPrompt] = useState(false); // el portero en pista acaba de ser expulsado: hay que elegir quién para
   // A quién se ha elegido a propósito para el puesto de portero, con el
   // selector dedicado — manda sobre la detección automática (que solo mira
   // quién de plantilla es portero), porque si hay más de un portero en la
@@ -1930,6 +1955,7 @@ export default function App() {
   const [zonedActionWizard, setZonedActionWizard] = useState(null);
   const [zonedEvents, setZonedEvents] = useState([]); // cada una con jugador, zona y minuto
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const narrow = useIsNarrow();
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [cropTarget, setCropTarget] = useState(null); // { kind: 'player'|'teamCrest'|'rivalCrest', id, src }
   const [pendingDrafts, setPendingDrafts] = useState(null); // { match?, training? } sesiones sin cerrar encontradas al abrir
@@ -2163,7 +2189,7 @@ export default function App() {
           seconds, half, halfLength, rivalName, rivalScore, rivalCrest, venue, matchStartTime,
           teamFouls, rivalTeamFouls, onCourt, convocados, goalEvents, disciplineEvents, zonedEvents, statsByHalf,
           rotations, openStints: [...stintsRef.current.entries()], chosenGoalkeeperId, shortHandedRestrictions,
-          rivalShortHandedRestrictions,
+          rivalShortHandedRestrictions, timeouts,
         }
       : null,
     training: trainingInProgress
@@ -2440,8 +2466,10 @@ export default function App() {
     setGoalEvents(d.goalEvents || []);
     setDisciplineEvents(d.disciplineEvents || []);
     setZonedEvents(d.zonedEvents || []);
+    setTimeouts(Array.isArray(d.timeouts) ? d.timeouts : []);
     setShortHandedRestrictions(d.shortHandedRestrictions || []);
     setRivalShortHandedRestrictions(d.rivalShortHandedRestrictions || []);
+    setUndoStack([]);
     setLastGoalEvent(null);
     setLastEvent(null);
 
@@ -2706,6 +2734,9 @@ export default function App() {
       // la opción de volver a jugar el resto del partido.
       if (key === "red") {
         if (onCourtRef.current.includes(playerId)) {
+          // Si el expulsado era quien estaba de portero, la pista se queda sin
+          // portero: se pregunta enseguida quién se pone (o se mete al suplente).
+          if (playerId === keeperOnCourtId) setKeeperRedPrompt(true);
           closeStint(playerId);
           setOnCourt((prev) => prev.filter((x) => x !== playerId));
           setShortHandedRestrictions((prev) => [...prev, { id: ev.id, half: h, startRemaining: remainingNow }]);
@@ -2713,34 +2744,46 @@ export default function App() {
       }
     }
     setLastEvent({ playerId, key, half: h, discId });
+    // Goles y asistencias entran en la pila por su propio flujo (el del gol).
+    if (key !== "goals" && key !== "assists") pushUndo({ kind: "action", playerId, key, half: h, discId });
   };
 
-  // Deshacer el último registro. El gol guarda su propio autor, así que
-  // deshacerlo resta el gol a quien tocaba aunque por medio haya pasado
-  // cualquier otra cosa — antes dependía de una referencia suelta que podía
-  // quedarse desincronizada y dejar el gol sin descontar.
+  // Deshacer en varios pasos: cada pulsación quita el registro anterior (gol,
+  // tarjeta, falta, tiro, pérdida, tiempo muerto...), del más reciente al más
+  // antiguo. La pila vive en memoria: tras recargar la app empieza vacía.
+  const pushUndo = (entry) => setUndoStack((prev) => [...prev.slice(-49), entry]);
+
+  // El gol guarda su propio autor, así que deshacerlo resta el gol a quien
+  // tocaba aunque por medio haya pasado cualquier otra cosa. Si el gol se
+  // editó después, se usa el autor actual y no el de cuando se anotó.
   const undoLast = () => {
-    if (lastGoalEvent) {
-      const ev = lastGoalEvent;
-      setGoalEvents((prev) => prev.filter((e) => e.id !== ev.id));
+    const entry = undoStack[undoStack.length - 1];
+    if (!entry) return;
+    setUndoStack((prev) => prev.slice(0, -1));
+    setLastEvent(null);
+    setLastGoalEvent(null);
+    if (entry.kind === "goal") {
+      const ev = goalEvents.find((e) => e.id === entry.id) || entry;
+      setGoalEvents((prev) => prev.filter((e) => e.id !== entry.id));
       if (ev.type === "for" && ev.authorId) {
         bump(ev.authorId, "goals", -1, ev.half);
         if (ev.assistId) bump(ev.assistId, "assists", -1, ev.half);
       } else if (ev.type === "against") setRivalScore((v) => Math.max(0, v - 1));
-      setLastGoalEvent(null);
-      setLastEvent(null);
       showToast("Gol deshecho");
       return;
     }
-    if (!lastEvent) return;
-    if (lastEvent.discId) {
-      setDisciplineEvents((prev) => prev.filter((e) => e.id !== lastEvent.discId));
+    if (entry.kind === "timeout") {
+      setTimeouts((prev) => prev.filter((t) => t.id !== entry.id));
+      showToast("Tiempo muerto deshecho");
+      return;
+    }
+    if (entry.discId) {
+      setDisciplineEvents((prev) => prev.filter((e) => e.id !== entry.discId));
       // Una roja deshecha tambien deja de servirse: la inferioridad nace con el
       // mismo id que el evento de disciplina.
-      setShortHandedRestrictions((prev) => prev.filter((r) => r.id !== lastEvent.discId));
+      setShortHandedRestrictions((prev) => prev.filter((r) => r.id !== entry.discId));
     }
-    bump(lastEvent.playerId, lastEvent.key, -1, lastEvent.half);
-    setLastEvent(null);
+    bump(entry.playerId, entry.key, -1, entry.half);
     showToast("Acción deshecha");
   };
 
@@ -2787,6 +2830,9 @@ export default function App() {
   // el historial no se desincroniza con sustituciones posteriores.
   const armGoal = () => { setActionsPopoverOpen(false); setPendingAction(null); setGoalWizard({ type: "for", authorId: null, authorName: null }); };
   const armRivalGoal = () => { setPendingAction(null); setGoalWizard({ type: "against", authorId: null, authorName: null }); };
+  // Autogol del rival: gol a favor que no es de ningún jugador nuestro. Se
+  // registra directo (sin autor, asistencia ni zona de finalización).
+  const registerRivalOwnGoal = () => finalizeGoalEvent({ type: "for", authorId: null, authorName: null, assistId: null, assistName: null, phase: "En propia", zone: null, ownGoal: true });
   const cancelGoalWizard = () => setGoalWizard(null);
 
   // El "−" del marcador rival quita el ultimo gol rival de verdad (su evento),
@@ -2799,6 +2845,7 @@ export default function App() {
     setGoalEvents((prev) => prev.filter((e) => e.id !== removed.id));
     setRivalScore((v) => Math.max(0, v - 1));
     if (lastGoalEvent && lastGoalEvent.id === removed.id) { setLastGoalEvent(null); setLastEvent(null); }
+    setUndoStack((prev) => prev.filter((e) => e.id !== removed.id));
     showToast("Gol rival quitado");
     saveDraftNow();
   };
@@ -2814,6 +2861,7 @@ export default function App() {
       type: wizard.type,
       authorId: isFor ? wizard.authorId : null,
       authorName: isFor ? wizard.authorName : null,
+      ownGoal: isFor && !!wizard.ownGoal, // autogol del rival: suma a favor sin autor nuestro
       assistId: isFor ? (wizard.assistId || null) : null,
       assistName: isFor ? (wizard.assistName || null) : null,
       phase: wizard.phase,
@@ -2824,11 +2872,12 @@ export default function App() {
     };
     setGoalEvents((prev) => [...prev, event]);
     setLastGoalEvent({ id: event.id, type: event.type, authorId: event.authorId, assistId: event.assistId });
+    pushUndo({ kind: "goal", id: event.id, type: event.type, authorId: event.authorId, assistId: event.assistId, half: event.half });
 
     if (isFor) {
-      bump(wizard.authorId, "goals", 1);
+      if (wizard.authorId) bump(wizard.authorId, "goals", 1);
       if (wizard.assistId) bump(wizard.assistId, "assists", 1);
-      showToast(`Gol de ${wizard.authorName}${wizard.assistId ? ` — asist. ${wizard.assistName}` : ""} — ${wizard.phase}`);
+      showToast(wizard.ownGoal ? "Autogol del rival — a favor" : `Gol de ${wizard.authorName}${wizard.assistId ? ` — asist. ${wizard.assistName}` : ""} — ${wizard.phase}`);
       // Marcar nosotros resuelve la expulsión del rival más antigua que
       // siga sirviéndose -- la superioridad dura 2 minutos de juego o hasta
       // que marquemos, lo que pase antes.
@@ -2924,6 +2973,24 @@ export default function App() {
     setEditingSavedGoal(null);
     showToast("Gol editado");
     loadHistoryFor(activeTeamId);
+  };
+
+  // Tiempo muerto (1 minuto): para el reloj y se anota con parte y minuto. No
+  // se bloquea por cuántos lleve cada equipo: el reglamento de cada competición
+  // cambia (uno por parte, uno por partido...), así que solo se cuenta y se
+  // muestra cuántos van en la parte para que el cuerpo técnico decida.
+  const registerTimeout = (team) => {
+    setClockRunning(false);
+    const h = halfRef.current;
+    const remainingNow = Math.max(0, halfMinutesFor(h, halfLenRef.current) * 60 - secondsRef.current);
+    const ev = { id: `to-${Date.now()}`, team, half: h, remaining: remainingNow };
+    const usedNow = timeouts.filter((t) => t.team === team && t.half === h).length + 1;
+    setTimeouts((prev) => [...prev, ev]);
+    setLastGoalEvent(null);
+    setLastEvent({ timeoutId: ev.id });
+    pushUndo({ kind: "timeout", id: ev.id });
+    showToast(`Tiempo muerto ${team === "for" ? "nuestro" : "del rival"} · ${usedNow}º en esta parte — reloj parado`);
+    saveDraftNow();
   };
 
   const armStatAction = (key, label) => {
@@ -3038,7 +3105,9 @@ export default function App() {
     setChosenGoalkeeperId((prev) => (prev === id ? null : prev));
   };
 
-  const teamGoals = players.reduce((sum, p) => sum + ((stats[p.id] && stats[p.id].goals) || 0), 0);
+  // Goles de jugadores + autogoles del rival (suman a favor sin ser de nadie nuestro).
+  const teamGoals = players.reduce((sum, p) => sum + ((stats[p.id] && stats[p.id].goals) || 0), 0)
+    + goalEvents.filter((e) => e.type === "for" && e.ownGoal).length;
 
   const resetMatch = () => {
     setClockRunning(false);
@@ -3052,7 +3121,7 @@ export default function App() {
     setOnCourt(startingFive); onCourtRef.current = startingFive;
     openStintsForCourt(startingFive, 1);
     setLastEvent(null);
-    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null);
+    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null); setHalfUndo(null); setKeeperRedPrompt(false); setTimeouts([]); setUndoStack([]);
     setShortHandedRestrictions([]);
     setRivalShortHandedRestrictions([]);
     setConvocados(null);
@@ -3095,7 +3164,7 @@ export default function App() {
     setOnCourt(startingFive); onCourtRef.current = startingFive;
     openStintsForCourt(startingFive, 1);
     setLastEvent(null);
-    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null);
+    setGoalWizard(null); setGoalEvents([]); setLastGoalEvent(null); setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null); setHalfUndo(null); setKeeperRedPrompt(false); setTimeouts([]); setUndoStack([]);
     setShortHandedRestrictions([]);
     setRivalShortHandedRestrictions([]);
     setConvocatoriaMode(null);
@@ -3129,6 +3198,7 @@ export default function App() {
       zonedEvents, // additive: cada pérdida, recuperación y tiro, con jugador, zona y minuto
       convocados: convocadosList, // additive: who was called up for this match
       rotations: rotationsRef.current, // additive: cada entrada y salida de la pista de cada jugador
+      timeouts, // additive: tiempos muertos pedidos (equipo, parte y minuto)
     };
     let saved = false;
     try {
@@ -3150,14 +3220,53 @@ export default function App() {
   };
 
   const startNextHalf = () => {
+    const prevRotations = rotationsRef.current;
+    const prevStints = new Map(stintsRef.current);
     setClockRunning(false); // liquida el tiempo pendiente en la parte que acaba
+    const prevSeconds = secondsRef.current; // ya liquidado arriba: es el minuto exacto en que estaba la parte
     onCourtRef.current.forEach((id) => closeStint(id)); // cierra la rotación de quien sigue en pista al cambiar de parte
     secondsRef.current = 0;
     setSeconds(0);
-    const next = halfRef.current + 1;
+    const prevHalf = halfRef.current;
+    const next = prevHalf + 1;
     halfRef.current = next; // a partir de aqui todo se anota en la parte nueva
     setHalf(next);
     onCourtRef.current.forEach((id) => openStint(id, next)); // y le abre una nueva, ya en la parte que empieza
+    setHalfUndo({
+      prevHalf, prevSeconds, prevRotations, prevStints,
+      rotLenAfter: rotationsRef.current.length, onCourtAfter: [...onCourtRef.current],
+      goalLen: goalEvents.length, discLen: disciplineEvents.length, zonedLen: zonedEvents.length,
+    });
+    saveDraftNow();
+  };
+
+  // Solo se puede deshacer mientras en la parte nueva no se haya anotado nada
+  // (ni goles, faltas, acciones, cambios...): así volver atrás no borra nada
+  // que alguien haya registrado a propósito. Los minutos que haya corrido el
+  // reloj en la parte nueva sí se descartan: es justo lo que se quiere deshacer.
+  const halfUndoValid = (() => {
+    const u = halfUndo;
+    if (!u || half !== u.prevHalf + 1) return false;
+    if (goalEvents.length !== u.goalLen || disciplineEvents.length !== u.discLen || zonedEvents.length !== u.zonedLen) return false;
+    if ((teamFouls[half] || 0) > 0 || (rivalTeamFouls[half] || 0) > 0) return false;
+    if (rotations.length !== u.rotLenAfter) return false;
+    if (onCourt.length !== u.onCourtAfter.length || onCourt.some((id) => !u.onCourtAfter.includes(id))) return false;
+    const halfMap = statsByHalf[half] || {};
+    return Object.values(halfMap).every((st) => STAT_KEYS.every((k) => k === "seconds" || !st[k]));
+  })();
+
+  const undoNextHalf = () => {
+    const u = halfUndo;
+    if (!u || !halfUndoValid) { showToast("Ya se anotó algo en esta parte: no se puede deshacer sin perderlo"); return; }
+    setClockRunning(false); // el reloj queda parado: se reanuda a mano
+    const dropHalf = halfRef.current;
+    setStatsByHalf((prev) => { const n = { ...prev }; delete n[dropHalf]; return n; });
+    rotationsRef.current = u.prevRotations; setRotations(u.prevRotations);
+    stintsRef.current = new Map(u.prevStints); // los de la pista siguen con la misma tanda que llevaban
+    secondsRef.current = u.prevSeconds; setSeconds(u.prevSeconds);
+    halfRef.current = u.prevHalf; setHalf(u.prevHalf);
+    setHalfUndo(null);
+    showToast(`Vuelves a la ${halfLabel(u.prevHalf).toLowerCase()} · quedan ${fmtClock(Math.max(0, halfMinutesFor(u.prevHalf, halfLength) * 60 - u.prevSeconds))}`);
     saveDraftNow();
   };
 
@@ -3173,7 +3282,7 @@ export default function App() {
     setSeconds(0); setHalf(1); halfRef.current = 1; setRivalScore(0); setTeamFouls({}); setRivalTeamFouls({});
     setRivalName("Rival"); setRivalCrest(null); setVenue(""); setMatchStartTime(null);
     setLastEvent(null); setLastGoalEvent(null); setGoalEvents([]); setConvocados(null);
-    setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null);
+    setDisciplineEvents([]); setZonedEvents([]); setZonedActionWizard(null); setHalfUndo(null); setKeeperRedPrompt(false); setTimeouts([]); setUndoStack([]);
     setChosenGoalkeeperId(null);
     setShortHandedRestrictions([]);
     setRivalShortHandedRestrictions([]);
@@ -3275,7 +3384,7 @@ export default function App() {
       {view !== "inicio" && (
         <>
           {/* HEADER */}
-          <div style={{ background: T.surface, borderBottom: `1px solid ${T.line}`, padding: "14px 16px" }}>
+          <div style={{ background: T.surface, borderBottom: `1px solid ${T.line}`, padding: narrow ? "8px 12px 10px" : "14px 16px" }}>
             {view === "entrenamiento" ? (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => setView("inicio")}>
@@ -3313,7 +3422,9 @@ export default function App() {
               </div>
             </div>
             )}
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
+            <div style={{ display: "flex", alignItems: narrow ? "center" : "flex-start", justifyContent: narrow ? "space-around" : "space-between", flexWrap: "wrap", gap: narrow ? 8 : 14 }}>
+              {/* En movil el nombre del equipo ya sale sobre su escudo en el marcador: se ahorra una fila. */}
+              {!narrow && (
               <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => setView("inicio")}>
                 <CrestAvatar crest={activeTeam.crest} size={40} onPick={(f) => handleTeamCrestFile(activeTeamId, f)} onReframe={() => handleTeamCrestReframe(activeTeamId, activeTeam.crest)} onRemove={() => handleTeamCrestRemove(activeTeamId)} />
                 <div>
@@ -3321,9 +3432,10 @@ export default function App() {
                   <div style={{ fontSize: 9, color: T.dim, letterSpacing: 1 }}>{activeTeam.subtitle}</div>
                 </div>
               </div>
+              )}
 
               {/* score — two symmetric columns so both crests sit at the exact same height */}
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 14, ...(narrow ? { flex: "1 1 100%", justifyContent: "center" } : {}) }}>
                 <ScoreColumn
                   labelNode={<div style={{ fontSize: 9, color: T.dim, height: 12, overflow: "hidden", whiteSpace: "nowrap", textAlign: "center" }}>{(activeTeam.name || "").split(" ")[0] || "Equipo"}</div>}
                   crest={<CrestAvatar crest={activeTeam.crest} size={32} onPick={(f) => handleTeamCrestFile(activeTeamId, f)} onReframe={() => handleTeamCrestReframe(activeTeamId, activeTeam.crest)} onRemove={() => handleTeamCrestRemove(activeTeamId)} />}
@@ -3347,7 +3459,7 @@ export default function App() {
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                <ClockDial seconds={remaining} progress={halfProgress} running={running} half={half} size={96} />
+                <ClockDial seconds={remaining} progress={halfProgress} running={running} half={half} size={narrow ? 76 : 96} />
                 {(activeShortHanded.length > 0 || activeRivalShortHanded.length > 0) && (
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "center" }}>
                     {activeShortHanded.map((r) => (
@@ -3364,8 +3476,8 @@ export default function App() {
                 )}
               </div>
 
-              <button onClick={() => { const next = !running; setClockRunning(next); if (next && !matchStartTime) setMatchStartTime(new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })); }} style={{ ...bigBtn, background: running ? T.negative : T.red, color: "#0A0A0A", fontSize: 24, fontWeight: 700, padding: "24px 40px", borderRadius: 16, gap: 12 }}>
-                {running ? <Pause size={32} /> : <Play size={32} />} {running ? "Pausar" : "Iniciar"}
+              <button onClick={() => { const next = !running; setClockRunning(next); if (next && !matchStartTime) setMatchStartTime(new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })); }} style={{ ...bigBtn, background: running ? T.negative : T.red, color: "#0A0A0A", fontSize: narrow ? 20 : 24, fontWeight: 700, padding: narrow ? "18px 26px" : "24px 40px", borderRadius: 16, gap: 12 }}>
+                {running ? <Pause size={narrow ? 24 : 32} /> : <Play size={narrow ? 24 : 32} />} {running ? "Pausar" : "Iniciar"}
               </button>
             </div>
             </>
@@ -3383,11 +3495,24 @@ export default function App() {
               {half >= 2 && half < MAX_HALVES && remaining <= 0 && (
                 <button onClick={startNextHalf} style={{ ...ghostBtn, borderColor: T.red, color: T.red }}><ChevronRight size={14} /> Empezar {halfLabel(half + 1)} (3 min)</button>
               )}
+              {halfUndoValid && (
+                <button onClick={undoNextHalf} style={{ ...ghostBtn, borderColor: T.amber, color: T.amber, fontWeight: 700 }} title="Vuelve a la parte anterior, al minuto en que estaba al pulsar el botón">
+                  <Undo2 size={14} /> Deshacer: volver a la {halfLabel(halfUndo.prevHalf)} ({fmtClock(Math.max(0, halfMinutesFor(halfUndo.prevHalf, halfLength) * 60 - halfUndo.prevSeconds))})
+                </button>
+              )}
+              {view === "partido" && ["for", "against"].map((team) => {
+                const n = timeouts.filter((t) => t.team === team && t.half === half).length;
+                return (
+                  <button key={team} onClick={() => registerTimeout(team)} title="Tiempo muerto: para el reloj y lo anota" style={{ ...ghostBtn, ...(n > 1 ? { borderColor: T.amber, color: T.amber } : {}) }}>
+                    ⏱ T.M. {team === "for" ? "nuestro" : "rival"}{n > 0 ? ` · ${n}` : ""}
+                  </button>
+                );
+              })}
               {view === "partido" && (
                 <button onClick={armRivalExpulsion} style={{ ...ghostBtn, borderColor: T.negative, color: T.negative }}><AlertTriangle size={13} /> Expulsión rival</button>
               )}
-              <div style={{ width: 1, height: 26, background: T.line }} />
-              <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 280 }}>
+              {!narrow && <div style={{ width: 1, height: 26, background: T.line }} />}
+              <div style={{ display: "flex", gap: 8, flex: narrow ? "1 1 100%" : 1, minWidth: narrow ? 0 : 280 }}>
                 <FoulsChip label="Faltas" value={currentTeamFouls} onInc={() => setTeamFouls((v) => ({ ...v, [half]: (v[half] || 0) + 1 }))} onDec={() => setTeamFouls((v) => ({ ...v, [half]: Math.max(0, (v[half] || 0) - 1) }))} />
                 <FoulsChip label="Rival" value={currentRivalTeamFouls} onInc={() => setRivalTeamFouls((v) => ({ ...v, [half]: (v[half] || 0) + 1 }))} onDec={() => setRivalTeamFouls((v) => ({ ...v, [half]: Math.max(0, (v[half] || 0) - 1) }))} />
               </div>
@@ -3489,6 +3614,7 @@ export default function App() {
             {goalWizard && goalWizard.type === "for" && !goalWizard.authorId && (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(230,57,70,0.18)", border: `1.5px solid ${T.red}`, borderRadius: 12, padding: "10px 14px", marginBottom: 14 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>⚽ ¿Quién marcó? — toca un jugador</span>
+                <button onClick={registerRivalOwnGoal} style={{ ...ghostBtn, padding: "6px 10px", fontSize: 11, marginLeft: "auto", marginRight: 8, flexShrink: 0 }} title="Gol a favor que mete el propio rival en su puerta: no es de ningún jugador nuestro">Autogol del rival</button>
                 <button onClick={cancelGoalWizard} style={iconBtnSm}><X size={14} /></button>
               </div>
             )}
@@ -3500,7 +3626,7 @@ export default function App() {
               </div>
             )}
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: narrow ? "repeat(2, minmax(0, 1fr))" : "repeat(auto-fill, minmax(210px, 1fr))", gap: narrow ? 8 : 10 }}>
               {sortedPlayers.filter((p) => (!convocados || convocados.includes(p.id)) && !sentOffIds.has(p.id)).map((p) => {
                 const isOn = onCourt.includes(p.id);
                 // El acumulado de la parte SIGUE sumando por debajo cada
@@ -3519,7 +3645,7 @@ export default function App() {
                   <PlayerCard
                     key={p.id} player={p} stats={stats[p.id] || emptyStats()} onCourt={isOn}
                     accumulatedSeconds={accumulatedSeconds} stintSeconds={stintSeconds}
-                    isKeeperCard={isKeeperCard} isActingKeeper={isKeeperCard && isActingKeeper}
+                    isKeeperCard={isKeeperCard} isActingKeeper={isKeeperCard && isActingKeeper} compact={narrow}
                     armed={!!pendingAction || !!(goalWizard && goalWizard.type === "for" && !goalWizard.authorId) || !!(zonedActionWizard && !zonedActionWizard.playerId)}
                     onTap={() => handlePlayerTap(p)}
                     onOpenStats={() => setStatPlayer(p.id)}
@@ -3672,6 +3798,28 @@ export default function App() {
         />
       )}
 
+      {keeperRedPrompt && (
+        <div style={overlayStyle} onClick={() => setKeeperRedPrompt(false)}>
+          <div style={{ ...modalCard, maxWidth: 460 }} onClick={(e) => e.stopPropagation()} className="fadein">
+            <div className="oswald" style={{ fontSize: 17, fontWeight: 600, marginBottom: 4 }}>🟥 Portero expulsado</div>
+            <div style={{ fontSize: 12, color: T.dim, lineHeight: 1.5, marginBottom: 12 }}>
+              Os quedáis sin portero en pista. Elige quién se pone de portero entre los que siguen en la pista.
+              Si prefieres meter al portero suplente, ciérralo y cámbialo desde el banquillo: entrará como portero.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+              {players.filter((p) => onCourt.includes(p.id)).map((p) => (
+                <button key={p.id} onClick={() => { setChosenGoalkeeperId(p.id); setKeeperRedPrompt(false); showToast(`${p.name} se pone de portero-jugador`); saveDraftNow(); }} style={{ display: "flex", alignItems: "center", gap: 10, background: T.surface2, border: `1.5px solid ${T.line}`, borderRadius: 10, padding: "9px 12px", cursor: "pointer", textAlign: "left" }}>
+                  <Avatar player={p} size={30} />
+                  <span style={{ fontSize: 14, fontWeight: 600, flex: 1, color: T.text }}>{p.name}</span>
+                  <span className="oswald" style={{ fontSize: 16, fontWeight: 700, color: T.red }}>{p.number}</span>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setKeeperRedPrompt(false)} style={{ ...ghostBtn, width: "100%", justifyContent: "center" }}>Más tarde</button>
+          </div>
+        </div>
+      )}
+
       {summaryOpen && (
         <SummaryModal
           players={sortedPlayers} stats={stats} statsByHalf={statsByHalf} goalEvents={goalEvents} disciplineEvents={disciplineEvents} zonedEvents={zonedEvents}
@@ -3744,13 +3892,14 @@ export default function App() {
 
       {view === "partido" && (
         <QuickActionBar
-          hasLastEvent={!!lastEvent || !!lastGoalEvent}
+          hasLastEvent={undoStack.length > 0}
           onGoal={armGoal}
           onOpenActions={() => setActionsPopoverOpen(true)}
           onOpenCards={() => setCardsPopoverOpen(true)}
           onOpenSummary={() => setSummaryOpen(true)}
           onUndo={undoLast}
           onFinish={() => setConfirmEnd(true)}
+          compact={narrow}
         />
       )}
 
@@ -4026,16 +4175,18 @@ function DraftRecoveryModal({ drafts, teamName, onResumeMatch, onDiscardMatch, o
 }
 
 /* Bottom quick-action bar for the Partido tab: tap an action, then tap a player to record it. */
-function QuickActionBar({ hasLastEvent, onGoal, onOpenActions, onOpenCards, onOpenSummary, onUndo, onFinish }) {
+function QuickActionBar({ hasLastEvent, onGoal, onOpenActions, onOpenCards, onOpenSummary, onUndo, onFinish, compact = false }) {
+  // En movil los 6 controles caben en UNA fila (antes saltaban a dos y la barra
+  // fija se comia ~175 px de una pantalla de 844).
   return (
-    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 80, background: T.surface, borderTop: `1px solid ${T.line}`, padding: `10px 14px calc(10px + env(safe-area-inset-bottom, 0px))`, boxShadow: "0 -8px 24px rgba(0,0,0,0.35)" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 20, maxWidth: 700, margin: "0 auto", flexWrap: "wrap" }}>
-        <QuickActionButton icon={() => <span style={{ fontSize: 20 }}>⚽</span>} label="Gol" onClick={onGoal} accent={T.red} />
-        <QuickActionButton icon={ClipboardList} label="Resumen" onClick={onOpenSummary} />
-        <QuickActionButton icon={Footprints} label="Acciones" onClick={onOpenActions} />
-        <QuickActionButton icon={(p) => <Square {...p} />} label="Tarjeta" onClick={onOpenCards} accent={T.amber} />
-        <QuickActionButton icon={Undo2} label="Deshacer" onClick={onUndo} disabled={!hasLastEvent} />
-        <button onClick={onFinish} style={{ ...bigBtn, background: T.white, color: T.bg, padding: "12px 18px", marginLeft: 8 }}>
+    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 80, background: T.surface, borderTop: `1px solid ${T.line}`, padding: `${compact ? 6 : 10}px ${compact ? 8 : 14}px calc(${compact ? 6 : 10}px + env(safe-area-inset-bottom, 0px))`, boxShadow: "0 -8px 24px rgba(0,0,0,0.35)" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: compact ? "space-between" : "center", gap: compact ? 2 : 20, maxWidth: 700, margin: "0 auto", flexWrap: compact ? "nowrap" : "wrap" }}>
+        <QuickActionButton compact={compact} icon={() => <span style={{ fontSize: 20 }}>⚽</span>} label="Gol" onClick={onGoal} accent={T.red} />
+        <QuickActionButton compact={compact} icon={ClipboardList} label="Resumen" onClick={onOpenSummary} />
+        <QuickActionButton compact={compact} icon={Footprints} label="Acciones" onClick={onOpenActions} />
+        <QuickActionButton compact={compact} icon={(p) => <Square {...p} />} label="Tarjeta" onClick={onOpenCards} accent={T.amber} />
+        <QuickActionButton compact={compact} icon={Undo2} label="Deshacer" onClick={onUndo} disabled={!hasLastEvent} />
+        <button onClick={onFinish} style={{ ...bigBtn, background: T.white, color: T.bg, padding: compact ? "12px 11px" : "12px 18px", marginLeft: compact ? 2 : 8, fontSize: compact ? 12 : 13, flexShrink: 0 }}>
           <Save size={16} /> Finalizar
         </button>
       </div>
@@ -4043,9 +4194,9 @@ function QuickActionBar({ hasLastEvent, onGoal, onOpenActions, onOpenCards, onOp
   );
 }
 
-function QuickActionButton({ icon: Icon, label, onClick, accent, disabled }) {
+function QuickActionButton({ icon: Icon, label, onClick, accent, disabled, compact = false }) {
   return (
-    <button onClick={onClick} disabled={disabled} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: "none", border: "none", cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.4 : 1, padding: "4px 6px" }}>
+    <button onClick={onClick} disabled={disabled} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: "none", border: "none", cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.4 : 1, padding: compact ? "2px 1px" : "4px 6px", minWidth: 0 }}>
       <div style={{ width: 46, height: 46, borderRadius: "50%", background: T.surface3, display: "flex", alignItems: "center", justifyContent: "center", border: `1.5px solid ${accent || T.line}` }}>
         <Icon size={20} color={accent || T.text} />
       </div>
@@ -4502,7 +4653,7 @@ function GoalLine({ ev, onEdit }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
         <div>
           <span style={{ fontWeight: 700, color: ev.type === "for" ? T.red : T.negative }}>
-            {ev.type === "for" ? `⚽ ${ev.authorName}` : "⚽ Rival"}
+            {ev.type === "for" ? `⚽ ${ev.authorName || "Autogol del rival"}` : "⚽ Rival"}
           </span>
           {" · "}{ev.phase} · {fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}
           {ev.assistName ? ` · 🅰 ${ev.assistName}` : ""}
@@ -4523,7 +4674,7 @@ function GoalLine({ ev, onEdit }) {
    el quinteto en pista queda tal y como se vio en su momento, eso no se
    toca, solo el autor, la fase y cuándo pasó. */
 function GoalEditModal({ event, players, presentHalves, halfLength, onSave, onClose }) {
-  const [authorId, setAuthorId] = useState(event.authorId || null);
+  const [authorId, setAuthorId] = useState(event.ownGoal ? "OWN" : (event.authorId || null)); // "OWN" = autogol del rival
   const [phase, setPhase] = useState(event.phase || null);
   const [half, setHalf] = useState(event.half || 1);
   const initialRemaining = event.remaining !== undefined ? event.remaining : (event.seconds || 0);
@@ -4561,6 +4712,10 @@ function GoalEditModal({ event, players, presentHalves, halfLength, onSave, onCl
           <>
             <div style={{ fontSize: 11, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>¿Quién marcó?</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto", marginBottom: 14 }}>
+              <button onClick={() => setAuthorId("OWN")} style={{ display: "flex", alignItems: "center", gap: 10, background: authorId === "OWN" ? "rgba(230,57,70,0.18)" : T.surface2, border: `1.5px solid ${authorId === "OWN" ? T.red : T.line}`, borderRadius: 10, padding: "7px 10px", cursor: "pointer", textAlign: "left" }}>
+                <span style={{ fontSize: 13, fontWeight: 600, flex: 1, color: T.text }}>Autogol del rival (no es de nadie nuestro)</span>
+                {authorId === "OWN" && <Check size={14} color={T.red} />}
+              </button>
               {players.map((p) => (
                 <button key={p.id} onClick={() => setAuthorId(p.id)} style={{ display: "flex", alignItems: "center", gap: 10, background: authorId === p.id ? "rgba(230,57,70,0.18)" : T.surface2, border: `1.5px solid ${authorId === p.id ? T.red : T.line}`, borderRadius: 10, padding: "7px 10px", cursor: "pointer", textAlign: "left" }}>
                   <Avatar player={p} size={30} />
@@ -4585,8 +4740,9 @@ function GoalEditModal({ event, players, presentHalves, halfLength, onSave, onCl
         <button
           disabled={(isFor && !authorId) || !phase}
           onClick={() => {
-            const author = isFor ? players.find((p) => p.id === authorId) : null;
-            onSave({ authorId: isFor ? authorId : null, authorName: isFor ? (author ? author.name : "") : null, phase, half, remaining });
+            const own = isFor && authorId === "OWN";
+            const author = isFor && !own ? players.find((p) => p.id === authorId) : null;
+            onSave({ authorId: isFor && !own ? authorId : null, authorName: isFor ? (own ? null : (author ? author.name : "")) : null, ownGoal: own, phase, half, remaining });
           }}
           style={{ ...bigBtn, justifyContent: "center", width: "100%", background: (isFor && !authorId) || !phase ? T.surface3 : T.red, color: (isFor && !authorId) || !phase ? T.dim : "#0A0A0A", cursor: (isFor && !authorId) || !phase ? "default" : "pointer" }}
         >
@@ -5116,7 +5272,7 @@ function TabBtn({ active, onClick, icon: Icon, label }) {
   );
 }
 
-function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, isKeeperCard, isActingKeeper, armed, onTap, onOpenStats }) {
+function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, isKeeperCard, isActingKeeper, armed, onTap, onOpenStats, compact = false }) {
   const hasBadges = stats.goals > 0 || stats.yellow > 0 || stats.red > 0 || stats.fouls > 0 || stats.saves > 0;
   // El portero (o portero-jugador) en pista lleva fondo propio, distinto del
   // rojo del resto — así se distingue a simple vista sin tener que leer nada.
@@ -5135,15 +5291,15 @@ function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, 
       className={`tap-target${armed ? " armable" : ""}`}
       style={{
         background: cardBg,
-        border: `3px solid ${borderTint}`,
-        boxShadow: onCourt ? `0 0 0 3px rgba(${glowColor},0.35), 0 6px 18px rgba(${glowColor},0.45)` : "none",
-        borderRadius: 14, padding: 12, cursor: "pointer",
+        border: `${compact ? 2 : 3}px solid ${borderTint}`,
+        boxShadow: onCourt ? `0 0 0 ${compact ? 2 : 3}px rgba(${glowColor},0.35), 0 6px 18px rgba(${glowColor},0.45)` : "none",
+        borderRadius: 14, padding: compact ? 8 : 12, cursor: "pointer", minWidth: 0,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <Avatar player={player} size={56} />
+      <div style={{ display: "flex", alignItems: "center", gap: compact ? 6 : 10 }}>
+        <Avatar player={player} size={compact ? 36 : 56} />
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: fgColor }}>{player.name}</div>
+          <div style={{ fontSize: compact ? 12 : 14, fontWeight: 700, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: fgColor }}>{player.name}</div>
           {/* El portero va anclado: no sale con un toque normal, así que esta
               etiqueta recuerda por qué su tarjeta se ve distinta y avisa
               cuando quien está parando no es el portero de plantilla. */}
@@ -5153,7 +5309,7 @@ function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, 
             </div>
           )}
         </div>
-        <div className="oswald" style={{ fontSize: 34, fontWeight: 700, color: jerseyColor, lineHeight: 1, flexShrink: 0 }}>{player.number}</div>
+        <div className="oswald" style={{ fontSize: compact ? 26 : 34, fontWeight: 700, color: jerseyColor, lineHeight: 1, flexShrink: 0 }}>{player.number}</div>
       </div>
 
       {/* El tiempo de ESTA tanda en pista: solo existe mientras el jugador
@@ -5162,7 +5318,7 @@ function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, 
           grande, y en blanco para que se distinga del acumulado de más abajo
           a simple vista. */}
       {onCourt && (
-        <div className="oswald" style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: T.white, marginTop: 8 }}>
+        <div className="oswald" style={{ fontSize: compact ? 34 : 42, fontWeight: 700, lineHeight: 1, color: T.white, marginTop: compact ? 4 : 8 }}>
           {fmtMin(stintSeconds)}
         </div>
       )}
@@ -5173,12 +5329,12 @@ function PlayerCard({ player, stats, onCourt, accumulatedSeconds, stintSeconds, 
           el jugador está en pista se queda congelado en lo que ya llevaba
           antes de esta tanda, y en cuanto sale salta de golpe a incluirla, en
           el mismo instante de la sustitución. */}
-      <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginTop: onCourt ? 14 : 6 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginTop: onCourt ? (compact ? 6 : 14) : 6 }}>
         <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.3, color: accumColor }}>Parte</span>
         <span className="oswald" style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.1, color: accumColor }}>{fmtMin(accumulatedSeconds)}</span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6, gap: 6, minHeight: 22 }}>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: compact ? 4 : 6, gap: 6, minHeight: 22 }}>
+        <div style={{ display: "flex", gap: compact ? 3 : 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
           {hasBadges && (
             <>
               {stats.goals > 0 && <MiniBadge color={fgColor}>⚽ {stats.goals}</MiniBadge>}
@@ -6067,6 +6223,12 @@ function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, 
           {halves.length > 0 && (
             <div style={{ fontSize: 10, color: T.dim, marginTop: 2 }}>{halves.map((h) => `${halfShortLabel(h.half)} ${scoreOf(h.half)}`).join(" · ")}</div>
           )}
+          {Array.isArray(m.timeouts) && m.timeouts.length > 0 && (
+            <div style={{ fontSize: 10, color: T.dim, marginTop: 2 }}>
+              ⏱ T.M.: {[["for", (teamName || "Nosotros").split(" ")[0]], ["against", "Rival"]]
+                .map(([team, label]) => `${label} ${m.timeouts.filter((t) => t.team === team).map((t) => halfShortLabel(t.half)).join(", ") || "—"}`).join(" · ")}
+            </div>
+          )}
         </div>
       </div>
 
@@ -6136,7 +6298,7 @@ function SavedMatchCard({ match: m, teamName, teamCrest, rosterPlayers, isOpen, 
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                       <div>
                         <span style={{ fontWeight: 700, color: ev.type === "for" ? T.red : T.negative }}>
-                          {ev.type === "for" ? `⚽ ${ev.authorName}` : "⚽ Rival"}
+                          {ev.type === "for" ? `⚽ ${ev.authorName || "Autogol del rival"}` : "⚽ Rival"}
                         </span>
                         {" · "}{ev.phase} · {halfLabel(ev.half)} · {fmtClock(ev.remaining !== undefined ? ev.remaining : ev.seconds)}
                         {ev.assistName ? ` · 🅰 ${ev.assistName}` : ""}

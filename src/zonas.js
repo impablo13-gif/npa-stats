@@ -92,7 +92,7 @@ export function collectZoneEvents(matches) {
     (m.zonedEvents || []).forEach((ev) => { if (ZONED_KEYS.has(ev.key)) push(ev.key, ev, ev.playerId, ev.playerName, ev.playerNumber); });
     (m.disciplineEvents || []).forEach((ev) => { if (DISCIPLINE_ZONED.has(ev.type)) push(ev.type, ev, ev.playerId, ev.playerName, ev.playerNumber); });
     (m.goalEvents || []).forEach((ev) => {
-      if (ev.type !== "for") return;
+      if (ev.type !== "for" || ev.ownGoal) return; // un autogol del rival no tiene autor ni zona nuestra
       const row = (ev.onCourt || []).find((p) => p.id === ev.authorId);
       push("goal", ev, ev.authorId, ev.authorName, row ? row.number : undefined);
     });
