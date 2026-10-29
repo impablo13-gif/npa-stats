@@ -10,7 +10,7 @@ import { storage, requestPersistence } from "./storage.js";
 import { ZONE_ACTIONS, ZONES_COARSE, ZONES_FINE, ZONE_LABELS, FINE_ROW_NAMES, toCoarseKey, isFineKey, collectZoneEvents, playersOf, filterEvents, countByZone, eventsToCsv } from "./zonas.js";
 import { selectMatches, seasonTable, playerReport, tableToCsv, seriesToCsv } from "./jugadores.js";
 import { buildPlayerReportHtml } from "./fichaHtml.js";
-import { seasonSummary, goalsByMinute, quintetBalance, goalsByPhase } from "./analisis.js";
+import { seasonSummary, goalsByMinute, quintetBalance, goalsByPhase, BUCKET_OPTIONS } from "./analisis.js";
 import { buildSeasonReportHtml } from "./memoriaHtml.js";
 import { buildBackup, summarizeBackup, fmtBytes, backupFileName, shareOrDownload, readBackupFile, applyBackup } from "./backup.js";
 
@@ -5844,6 +5844,7 @@ function SeasonGoalStatsView({ matches, teamName, onRowClick }) {
    se vuelca al PDF. La lógica vive en analisis.js y el HTML en memoriaHtml.js. */
 function SeasonAnalysisView({ matches, teamId, teamName }) {
   const [periodValue, setPeriodValue] = useState("all");
+  const [bucketMin, setBucketMin] = useState(5); // tamaño del tramo de "goles por minuto": 2, 3, 5 o 10
   const [notes, setNotes] = useState("");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
@@ -5878,9 +5879,9 @@ function SeasonAnalysisView({ matches, teamId, teamName }) {
   };
 
   const html = useMemo(() => buildSeasonReportHtml({
-    teamName, periodLabel, summary: seasonSummary(chosen), minutes: goalsByMinute(chosen), quintets: quintetBalance(chosen),
+    teamName, periodLabel, summary: seasonSummary(chosen), minutes: goalsByMinute(chosen, bucketMin), quintets: quintetBalance(chosen),
     phases: goalsByPhase(chosen), phaseOrder: GOAL_PHASES, playersTable: seasonTable(matches, period), notes,
-  }), [chosen, matches, period, teamName, periodLabel, notes]);
+  }), [chosen, matches, period, teamName, periodLabel, notes, bucketMin]);
 
   const exportPdf = async () => {
     if (exporting) return;
@@ -5904,6 +5905,11 @@ function SeasonAnalysisView({ matches, teamId, teamName }) {
             {matches.length > 3 && <option value="last3">Últimos 3 partidos</option>}
             {matches.length > 5 && <option value="last5">Últimos 5 partidos</option>}
             {sortedMatches.map((m) => <option key={m.date} value={`m:${m.date}`}>{new Date(m.date).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" })} vs {m.rivalName || "Rival"}</option>)}
+          </select>
+        </label>
+        <label style={{ flex: "0 1 170px" }}><span style={labelStyle}>Goles por minuto: tramo</span>
+          <select value={bucketMin} onChange={(e) => setBucketMin(Number(e.target.value))} style={selectStyle}>
+            {BUCKET_OPTIONS.map((n) => <option key={n} value={n}>{n} minutos</option>)}
           </select>
         </label>
         <button onClick={exportPdf} disabled={exporting} style={{ ...ghostBtn, borderColor: T.red, color: T.red, fontWeight: 700, opacity: exporting ? 0.6 : 1 }}><Download size={14} /> {exporting ? "Generando…" : "Descargar memoria (PDF)"}</button>

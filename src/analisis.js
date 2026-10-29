@@ -14,7 +14,9 @@
 
 import { rowKey } from "./jugadores.js";
 
-export const BUCKET_MIN = 5;
+export const BUCKET_MIN = 5; // tramo por defecto
+export const BUCKET_OPTIONS = [2, 3, 5, 10]; // tamaños de tramo que se pueden elegir
+const EDGE_MIN = 5; // "primeros y ultimos 5 minutos" no depende del tramo elegido
 export const QUINTET_LOW_SAMPLE = 3; // por debajo de tantos goles, el balance de un quinteto es anecdotico
 const OT_HALF_MIN = 3;
 
@@ -33,19 +35,20 @@ export function seasonSummary(matches) {
   return s;
 }
 
-/* Goles a favor y en contra por tramos de 5 minutos de cada parte, mas los
+/* Goles a favor y en contra por tramos (2, 3, 5 o 10 min) de cada parte, mas los
    primeros y los ultimos 5 minutos de cada parte. Solo partes reglamentarias
    (1ª y 2ª) en la tabla; la prorroga se cuenta en el total pero no en tramos. */
-export function goalsByMinute(matches) {
+export function goalsByMinute(matches, bucketMin = BUCKET_MIN) {
+  const size = BUCKET_OPTIONS.includes(Number(bucketMin)) ? Number(bucketMin) : BUCKET_MIN;
   const maxLen = Math.max(20, ...(matches || []).map((m) => Number(m.halfLength) || 20));
-  const nBuckets = Math.ceil(maxLen / BUCKET_MIN);
+  const nBuckets = Math.ceil(maxLen / size);
   const rows = [];
   [1, 2].forEach((half) => {
     for (let b = 0; b < nBuckets; b += 1) {
-      rows.push({ half, from: b * BUCKET_MIN, to: Math.min((b + 1) * BUCKET_MIN, maxLen), favor: 0, contra: 0 });
+      rows.push({ half, from: b * size, to: Math.min((b + 1) * size, maxLen), favor: 0, contra: 0 });
     }
   });
-  const out = { rows, total: { favor: 0, contra: 0 }, first5: { favor: 0, contra: 0 }, last5: { favor: 0, contra: 0 }, extraTime: { favor: 0, contra: 0 }, withoutMinute: 0 };
+  const out = { bucketMin: size, rows, total: { favor: 0, contra: 0 }, first5: { favor: 0, contra: 0 }, last5: { favor: 0, contra: 0 }, extraTime: { favor: 0, contra: 0 }, withoutMinute: 0 };
   (matches || []).forEach((m) => {
     const baseLen = Number(m.halfLength) || 20;
     (m.goalEvents || []).forEach((ev) => {
@@ -57,10 +60,10 @@ export function goalsByMinute(matches) {
       if (half > 2) { out.extraTime[side] += 1; return; }
       const len = halfMinutes(half, baseLen) * 60;
       const elapsed = Math.min(len, Math.max(0, len - ev.remaining));
-      const bucket = Math.min(Math.floor(elapsed / (BUCKET_MIN * 60)), nBuckets - 1);
+      const bucket = Math.min(Math.floor(elapsed / (size * 60)), nBuckets - 1);
       rows[(half - 1) * nBuckets + bucket][side] += 1;
-      if (elapsed < BUCKET_MIN * 60) out.first5[side] += 1;
-      if (ev.remaining <= BUCKET_MIN * 60) out.last5[side] += 1;
+      if (elapsed < EDGE_MIN * 60) out.first5[side] += 1;
+      if (ev.remaining <= EDGE_MIN * 60) out.last5[side] += 1;
     });
   });
   return out;
