@@ -7,6 +7,7 @@ import {
   Maximize2, Minimize2, Download, RefreshCw, WifiOff, Share2, Upload, DatabaseBackup,
 } from "lucide-react";
 import { storage, requestPersistence } from "./storage.js";
+import { ZONE_ACTIONS, collectZoneEvents, playersOf, filterEvents, countByZone, eventsToCsv } from "./zonas.js";
 import { buildBackup, summarizeBackup, fmtBytes, backupFileName, shareOrDownload, readBackupFile, applyBackup } from "./backup.js";
 
 /* TOKENS — colores del escudo real del Noia Portus Apostoli FS:
@@ -5311,6 +5312,7 @@ function HistoryView({ matches, trainings, teamName, teamCrest, rosterPlayers, s
         <SubTabBtn active={subTab === "partidos"} onClick={() => onSubTabChange("partidos")} label={`Partidos (${matches.length})`} />
         <SubTabBtn active={subTab === "entrenamientos"} onClick={() => onSubTabChange("entrenamientos")} label={`Entrenamientos (${trainings.length})`} />
         <SubTabBtn active={subTab === "estadisticas"} onClick={() => onSubTabChange("estadisticas")} label="Fases de gol" />
+        <SubTabBtn active={subTab === "zonas"} onClick={() => onSubTabChange("zonas")} label="Zonas" />
       </div>
 
       {subTab === "partidos" && (
@@ -5383,6 +5385,8 @@ function HistoryView({ matches, trainings, teamName, teamCrest, rosterPlayers, s
           onRowClick={(date) => { setOpen(date); onSubTabChange("partidos"); }}
         />
       )}
+
+      {subTab === "zonas" && <SeasonZonesView matches={matches} teamName={teamName} />}
     </div>
   );
 }
@@ -5576,6 +5580,192 @@ function SeasonGoalStatsView({ matches, teamName, onRowClick }) {
             })}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+/* Mapa de zonas de la temporada. Lo unico espacial que registra la app es la
+   ZONA (rejilla 3x3 que se toca al anotar la accion), asi que esto es la
+   distribucion de acciones por zona -- no posiciones exactas ni ocupacion de la
+   pista. Mismo orden que el selector de zona: vuestra porteria abajo, la rival
+   arriba. La logica (filtros, conteos, CSV) vive en zonas.js y esta probada. */
+const ZONE_ACTION_RGB = {
+  finish: "230,57,70", goal: "230,57,70", shotsOn: "230,57,70", shotsOff: "154,154,154", shotsPost: "227,178,60",
+  recoveries: "47,191,135", turnovers: "227,178,60", fouls: "224,138,60", foulsReceived: "59,130,196",
+};
+const ZONE_LOW_DATA = 15;
+
+function SeasonZonesView({ matches, teamName }) {
+  const [action, setAction] = useState("finish");
+  const [playerKey, setPlayerKey] = useState("all");
+  const [half, setHalf] = useState("all");
+  const [matchDate, setMatchDate] = useState("all");
+
+  const { events: allEvents, withoutZone } = useMemo(() => collectZoneEvents(matches), [matches]);
+  const players = useMemo(() => playersOf(allEvents), [allEvents]);
+  const filtered = useMemo(() => filterEvents(allEvents, { action, playerKey, half, matchDate }), [allEvents, action, playerKey, half, matchDate]);
+  const { counts, share, total, max } = useMemo(() => countByZone(filtered), [filtered]);
+
+  const actionDef = ZONE_ACTIONS.find((a) => a.key === action) || ZONE_ACTIONS[0];
+  const rgb = ZONE_ACTION_RGB[action] || ZONE_ACTION_RGB.finish;
+  const sortedMatches = [...matches].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  // Por lineas (de ataque a defensa) y por carriles: la lectura tactica rapida.
+  const lineTotals = [
+    { label: "Zona de ataque", n: counts["ataque-izq"] + counts["ataque-centro"] + counts["ataque-der"] },
+    { label: "Zona media", n: counts["medio-izq"] + counts["medio-centro"] + counts["medio-der"] },
+    { label: "Zona defensiva", n: counts["def-izq"] + counts["def-centro"] + counts["def-der"] },
+  ];
+  const laneTotals = [
+    { label: "Izquierda", n: counts["ataque-izq"] + counts["medio-izq"] + counts["def-izq"] },
+    { label: "Centro", n: counts["ataque-centro"] + counts["medio-centro"] + counts["def-centro"] },
+    { label: "Derecha", n: counts["ataque-der"] + counts["medio-der"] + counts["def-der"] },
+  ];
+
+  const exportCsv = () => {
+    const csv = eventsToCsv(filtered, {
+      zoneLabel: (k) => PITCH_ZONE_LABEL[k] || k,
+      actionLabel: (k) => (k === "goal" ? "Gol" : ZONED_LABEL[k] || DISCIPLINE_LABEL[k] || k),
+    });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${sanitizeFileName(teamName) || "equipo"}_zonas_${action}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  };
+
+  if (!matches.length) {
+    return <div style={{ padding: 20, textAlign: "center", color: T.dim, fontSize: 13, border: `1px dashed ${T.line}`, borderRadius: 12 }}>Todavía no hay partidos guardados para calcular el mapa de zonas.</div>;
+  }
+
+  const W = 300, H = 420, pad = 20;
+  const courtW = W - pad * 2, courtH = H - pad * 2;
+  const colW = courtW / 3, rowH = courtH / 3;
+  const selectStyle = { background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, color: T.text, padding: "8px 10px", width: "100%" };
+  const labelStyle = { fontSize: 10, fontWeight: 700, color: T.dim, textTransform: "uppercase", letterSpacing: 0.4, display: "block", marginBottom: 4 };
+
+  return (
+    <div className="fadein">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, letterSpacing: 0.5, color: T.text, textTransform: "uppercase" }}>
+          <MapPin size={14} /> Mapa de zonas de la temporada
+        </div>
+        <button onClick={exportCsv} disabled={!total} style={{ ...ghostBtn, borderColor: total ? T.red : T.line, color: total ? T.red : T.dim, opacity: total ? 1 : 0.5, cursor: total ? "pointer" : "default" }}>
+          <FileSpreadsheet size={14} /> Exportar CSV
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 12 }}>
+        <label><span style={labelStyle}>Acción</span>
+          <select value={action} onChange={(e) => setAction(e.target.value)} style={selectStyle}>
+            {ZONE_ACTIONS.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
+          </select>
+        </label>
+        <label><span style={labelStyle}>Jugador</span>
+          <select value={playerKey} onChange={(e) => setPlayerKey(e.target.value)} style={selectStyle}>
+            <option value="all">Todo el equipo</option>
+            {players.map((p) => <option key={p.key} value={p.key}>#{p.number} {p.name}</option>)}
+          </select>
+        </label>
+        <label><span style={labelStyle}>Parte</span>
+          <select value={half} onChange={(e) => setHalf(e.target.value)} style={selectStyle}>
+            <option value="all">Todo el partido</option>
+            <option value="1">1ª parte</option>
+            <option value="2">2ª parte</option>
+            <option value="ot">Prórroga</option>
+          </select>
+        </label>
+        <label><span style={labelStyle}>Partido</span>
+          <select value={matchDate} onChange={(e) => setMatchDate(e.target.value)} style={selectStyle}>
+            <option value="all">Toda la temporada ({matches.length})</option>
+            {sortedMatches.map((m) => <option key={m.date} value={m.date}>{new Date(m.date).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" })} vs {m.rivalName || "Rival"}</option>)}
+          </select>
+        </label>
+      </div>
+
+      <div style={{ fontSize: 11, color: T.dim, lineHeight: 1.5, marginBottom: 12 }}>
+        Cada zona cuenta cuántas veces se anotó <strong style={{ color: T.text }}>{actionDef.label.toLowerCase()}</strong> en ella. La zona se marca a mano al anotar la acción (rejilla 3×3):
+        es una <strong style={{ color: T.text }}>distribución por zonas</strong>, no la posición exacta ni la ocupación de la pista.
+      </div>
+
+      {total > 0 && total < ZONE_LOW_DATA && (
+        <div style={{ background: "rgba(227,178,60,0.12)", border: `1px solid ${T.amber}`, borderRadius: 10, padding: "8px 12px", fontSize: 12, marginBottom: 12 }}>
+          Solo hay {total} registro{total === 1 ? "" : "s"} con este filtro: tómalo como orientación, no como tendencia.
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div style={{ flex: "1 1 300px", maxWidth: 380, margin: "0 auto" }}>
+          <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Mapa de zonas: ${total} registros de ${actionDef.label.toLowerCase()}`} style={{ width: "100%", height: "auto", display: "block", background: T.surface, borderRadius: 12, border: `1px solid ${T.line}` }}>
+            <rect x={pad} y={pad} width={courtW} height={courtH} fill="none" stroke={T.line} strokeWidth="2" rx="4" />
+            <line x1={pad} y1={H / 2} x2={W - pad} y2={H / 2} stroke={T.line} strokeWidth="2" />
+            <circle cx={W / 2} cy={H / 2} r="26" fill="none" stroke={T.line} strokeWidth="2" />
+            <path d={`M ${pad + 50} ${H - pad} A 40 40 0 0 1 ${W - pad - 50} ${H - pad}`} fill="none" stroke={T.line} strokeWidth="2" />
+            <path d={`M ${pad + 50} ${pad} A 40 40 0 0 0 ${W - pad - 50} ${pad}`} fill="none" stroke={T.line} strokeWidth="2" />
+            <rect x={W / 2 - 16} y={H - pad - 3} width="32" height="6" fill={T.dim} />
+            <rect x={W / 2 - 16} y={pad - 3} width="32" height="6" fill={T.dim} />
+            {PITCH_ZONES.map((z) => {
+              const n = counts[z.key];
+              const x = pad + z.col * colW, y = pad + (2 - z.row) * rowH;
+              const alpha = n > 0 && max > 0 ? 0.14 + 0.76 * (n / max) : 0.04;
+              return (
+                <g key={z.key}>
+                  <title>{`${PITCH_ZONE_LABEL[z.key]}: ${n} (${Math.round(share[z.key] * 100)} %)`}</title>
+                  <rect x={x + 3} y={y + 3} width={colW - 6} height={rowH - 6} rx="10" fill={`rgba(${rgb},${alpha})`} stroke={`rgba(${rgb},${n > 0 ? 0.9 : 0.25})`} strokeWidth="1.5" />
+                  <text x={x + colW / 2} y={y + rowH / 2 - 2} textAnchor="middle" dominantBaseline="middle" fill={n > 0 ? "#fff" : T.dim} fontSize="26" fontWeight="800" style={{ fontFamily: "Oswald, sans-serif" }}>{n}</text>
+                  <text x={x + colW / 2} y={y + rowH / 2 + 22} textAnchor="middle" fill={n > 0 ? "rgba(255,255,255,0.85)" : T.dim} fontSize="11" fontWeight="600">{total ? `${Math.round(share[z.key] * 100)} %` : "—"}</text>
+                </g>
+              );
+            })}
+            <text x={W / 2} y={12} textAnchor="middle" fill={T.dim} fontSize="9" fontWeight="700" letterSpacing="1">PORTERÍA RIVAL</text>
+            <text x={W / 2} y={H - 4} textAnchor="middle" fill={T.dim} fontSize="9" fontWeight="700" letterSpacing="1">VUESTRA PORTERÍA</text>
+          </svg>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 11, color: T.dim }}>
+            <span>0</span>
+            <div style={{ flex: 1, height: 8, borderRadius: 4, background: `linear-gradient(90deg, rgba(${rgb},0.08), rgba(${rgb},0.9))` }} />
+            <span>{max}</span>
+            <span style={{ marginLeft: 6 }}>n = <strong style={{ color: T.text }}>{total}</strong></span>
+          </div>
+        </div>
+
+        <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+          {[{ title: "Por línea (de ataque a defensa)", rows: lineTotals }, { title: "Por carril", rows: laneTotals }].map((blk) => (
+            <div key={blk.title} style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 12, padding: 12, marginBottom: 12 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: T.dim, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>{blk.title}</div>
+              {blk.rows.map((r) => {
+                const pct = total ? Math.round((r.n / total) * 100) : 0;
+                return (
+                  <div key={r.label} style={{ marginBottom: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 }}>
+                      <span>{r.label}</span><span><strong>{r.n}</strong> <span style={{ color: T.dim }}>· {pct} %</span></span>
+                    </div>
+                    <div style={{ height: 6, borderRadius: 3, background: T.surface3, overflow: "hidden" }}>
+                      <div style={{ width: `${pct}%`, height: "100%", background: `rgb(${rgb})` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+
+          {!total && (
+            <div style={{ fontSize: 12, color: T.dim, lineHeight: 1.5, border: `1px dashed ${T.line}`, borderRadius: 12, padding: 12, marginBottom: 12 }}>
+              No hay registros con zona para este filtro. Las acciones se mapean cuando, al anotarlas en el partido, se toca la zona del campo.
+            </div>
+          )}
+
+          {withoutZone > 0 && (
+            <div style={{ fontSize: 11, color: T.dim, lineHeight: 1.5 }}>
+              {withoutZone} acción{withoutZone === 1 ? "" : "es"} de la temporada {withoutZone === 1 ? "se anotó" : "se anotaron"} sin zona (por ejemplo, de partidos antiguos) y no {withoutZone === 1 ? "sale" : "salen"} en el mapa.
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

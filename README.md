@@ -81,6 +81,16 @@ El service worker (lo que permite funcionar sin conexión) solo se activa en la
 versión compilada, así que para probar el modo offline hay que usar
 `npm run preview`, no `npm run dev`.
 
+### Pruebas
+
+```bash
+npm test
+```
+
+Prueba la lógica pura del mapa de zonas (`src/zonas.js`) con el ejecutor de
+pruebas de Node, sin dependencias nuevas. El despliegue a GitHub Pages ejecuta
+`npm test` antes de compilar: si falla, no se publica.
+
 ### Iconos
 
 Los iconos son un escudo genérico generado por código. Para regenerarlos:
@@ -242,6 +252,21 @@ siempre abajo, la rival arriba. Se toca la zona donde ocurrió y queda
 registrado con jugador, zona y minuto. Se ve en Resumen, en el Historial y en
 la exportación a Excel (hojas «Zonas» y, para las faltas, también «Faltas y
 tarjetas»).
+
+### Mapa de zonas de la temporada
+
+En **Historial → Zonas** se ve, sobre la pista, dónde se anotó cada acción a lo
+largo de la temporada: finalizaciones (goles y tiros), recuperaciones, pérdidas y
+faltas. Se filtra por acción, jugador, parte y partido, y enseña el total por
+zona, por línea (ataque, medio, defensa) y por carril. **Exportar CSV** baja los
+eventos del filtro actual (separador `;`, abre bien en Excel en español).
+
+Es una **distribución por zonas**, no un mapa de posiciones: la app solo
+guarda la zona (rejilla 3×3) que se toca al anotar la acción, no coordenadas
+exactas, así que no puede decir dónde estaba cada jugador ni cuánto ocupó la
+pista. Lo que no se anotó con zona (tarjetas, goles rivales, partidos antiguos)
+no sale en el mapa y la pantalla avisa de cuántas acciones se quedan fuera.
+Con menos de 15 registros avisa de que es solo orientación.
 
 ### Informe
 

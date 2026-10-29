@@ -28,6 +28,9 @@ jobs:
 
       - run: npm ci
 
+      # Si falla una prueba, no se publica.
+      - run: npm test
+
       # GitHub Pages sirve el sitio bajo /<nombre-del-repo>/, asi que la ruta
       # base se toma del propio repositorio: funciona se llame como se llame.
       - name: Compilar
