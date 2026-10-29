@@ -288,9 +288,10 @@ Con menos de 15 registros avisa de que es solo orientación.
   haya anotado nada.
 - **Autogol del rival**: al pedir «¿Quién marcó?» hay un botón que anota un gol a
   favor sin autor (suma al marcador, no es de ningún jugador).
-- **Portero expulsado**: al sacarle roja al portero en pista, un aviso deja elegir
-  quién se pone de portero entre los que siguen en pista; al suplente se le mete
-  desde el banquillo y entra como portero.
+- **Portero expulsado**: es una expulsión normal (con uno menos 2 minutos de juego
+  o hasta gol del rival) y el expulsado no puede volver a jugar ese partido. Un
+  aviso deja meter al portero suplente (sale un jugador de pista) o poner de
+  portero a uno de los que siguen en pista.
 - **Tiempos muertos**: botones «T.M. nuestro» y «T.M. rival»; paran el reloj y se
   anotan con parte y minuto (se ven en la ficha del partido). No se bloquea por
   cuántos lleve cada equipo porque el reglamento de cada competición varía.
