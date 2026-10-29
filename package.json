@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test tests/zonas.test.js",
+    "test": "node --test tests/zonas.test.js tests/jugadores.test.js tests/ficha.test.js",
     "preview": "vite preview --host",
     "icons": "node tools/make-icons.mjs"
   },

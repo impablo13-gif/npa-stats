@@ -87,8 +87,10 @@ versión compilada, así que para probar el modo offline hay que usar
 npm test
 ```
 
-Prueba la lógica pura del mapa de zonas (`src/zonas.js`) con el ejecutor de
-pruebas de Node, sin dependencias nuevas. El despliegue a GitHub Pages ejecuta
+Prueba la lógica pura con el ejecutor de pruebas de Node, sin dependencias
+nuevas: el mapa de zonas (`src/zonas.js`), los agregados por jugador
+(`src/jugadores.js`) y el HTML de la ficha (`src/fichaHtml.js`, incluido que
+escape los textos). El despliegue a GitHub Pages ejecuta
 `npm test` antes de compilar: si falla, no se publica.
 
 ### Iconos
@@ -274,6 +276,37 @@ fuera y en la de 9 sale todo junto (lo nuevo se agrupa en la zona de 9 que lo
 contiene). El informe PDF sigue dibujando el campo en 9 zonas. Lo que no se anotó con zona (tarjetas, goles rivales, partidos antiguos)
 no sale en el mapa y la pantalla avisa de cuántas acciones se quedan fuera.
 Con menos de 15 registros avisa de que es solo orientación.
+
+### Fichas de jugador
+
+En **Historial → Jugadores** hay una tabla de la plantilla con los totales del
+**periodo** elegido (toda la temporada, los últimos 3 o 5 partidos, o un partido
+concreto): partidos con minutos, minutos, goles, asistencias, finalizaciones,
+efectividad, recuperaciones, pérdidas, faltas, tarjetas y **+/- en pista**. Se
+ordena tocando la cabecera y **Exportar CSV** baja la tabla.
+
+Al tocar un jugador se abre su **ficha**: resumen, acciones, ritmo por 40 min,
+partido a partido (con minutos y +/-), mapa de zonas del jugador (a elegir la
+acción) y un cuadro de **conclusiones del entrenador** que se guarda solo, por
+equipo y jugador, y viaja en la copia de seguridad. **Descargar PDF** baja la
+misma ficha que se ve en pantalla; **CSV partido a partido** baja su serie.
+
+Criterios (para no leer de más los números):
+
+- **Convocado** es quien está en la convocatoria del partido; en partidos
+  antiguos sin convocatoria, quien tiene minutos o alguna acción. **Jugó** es
+  tener minutos. Convocado sin jugar cuenta como convocatoria, no como partido.
+- **+/-** = goles a favor menos en contra marcados con el jugador en el quinteto
+  (sale de la foto de los 5 en pista que se guarda en cada gol). Es contexto,
+  no mérito individual, y solo cuenta partidos con minutos.
+- **Finalizaciones** = goles + tiros a puerta + fuera + al palo.
+- **Ritmo por 40 min** solo se calcula con 20 min jugados o más y se marca como
+  orientativo por debajo de 60; antes sale «—» (con pocos minutos un ritmo
+  engaña).
+- Los partidos antiguos no guardaron el identificador del jugador: si un mismo
+  jugador sale en dos filas, la pantalla lo avisa; cada fila es correcta pero
+  está repartida.
+- No hay datos de pases, duelos ni vídeo: la app no los registra y no se estiman.
 
 ### Informe
 
