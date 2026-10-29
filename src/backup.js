@@ -13,7 +13,7 @@ export const BACKUP_VERSION = 1;
 
 // Los borradores son un partido a medias de ESTE dispositivo: llevarselos a
 // otra tablet solo generaria confusion. La copia guarda lo consolidado.
-const isTransientKey = (k) => String(k).startsWith("draft:") || k === "activeTeamId";
+const isTransientKey = (k) => String(k).startsWith("draft:") || k === "activeTeamId" || k === "lastBackupAt";
 
 export async function buildBackup() {
   const all = await storage.all();

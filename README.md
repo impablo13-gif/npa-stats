@@ -298,6 +298,33 @@ Con menos de 15 registros avisa de que es solo orientación.
 - En pantallas de móvil (menos de 600 px) la pantalla de partido se compacta:
   cabecera más baja, jugadores en 2 columnas y barra inferior en una fila.
 
+### Análisis de temporada y memoria
+
+**Historial → Análisis** reúne, para el periodo elegido (temporada, últimos 3 o 5
+partidos o uno solo): resumen y resultados (puntos 3-1-0), goles por fase,
+**goles por minuto** (tramos de 5' de cada parte, más los primeros y últimos 5'),
+jugadores con más minutos y **quintetos con más goles**. Se ve en pantalla y se
+baja en PDF con **Descargar memoria**; las conclusiones del entrenador se guardan
+solas y salen en el PDF.
+
+- Los minutos de los goles son tiempo jugado dentro de cada parte; un gol sin
+  minuto (partidos antiguos) se cuenta aparte y se avisa, y la prórroga no entra
+  en los tramos.
+- El balance de un quinteto es de **goles** con esos cinco en pista al marcarse.
+  La app no guarda cuánto tiempo estuvo cada quinteto, así que no es un balance
+  por minuto; con menos de 3 goles se marca como «muestra pequeña».
+
+### Copia de seguridad y actualización
+
+- **Aviso de copia**: en Inicio sale cuándo fue la última copia de seguridad y,
+  si no hay ninguna o tiene 7 días o más, un aviso con «Hacer copia ahora». La
+  fecha es una marca de cada dispositivo y no viaja dentro de la copia.
+- **Forzar actualización** (Inicio, bajo la versión): quita el service worker y
+  vacía la caché de archivos de la app y recarga; al volver a abrir con
+  conexión se descarga la versión actual desde cero. **No borra los datos**
+  (equipos, partidos, plantilla): esos viven en IndexedDB y no se tocan. No
+  está disponible con un partido en curso ni sin conexión.
+
 ### Fichas de jugador
 
 En **Historial → Jugadores** hay una tabla de la plantilla con los totales del

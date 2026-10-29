@@ -10,6 +10,8 @@ import { storage, requestPersistence } from "./storage.js";
 import { ZONE_ACTIONS, ZONES_COARSE, ZONES_FINE, ZONE_LABELS, FINE_ROW_NAMES, toCoarseKey, isFineKey, collectZoneEvents, playersOf, filterEvents, countByZone, eventsToCsv } from "./zonas.js";
 import { selectMatches, seasonTable, playerReport, tableToCsv, seriesToCsv } from "./jugadores.js";
 import { buildPlayerReportHtml } from "./fichaHtml.js";
+import { seasonSummary, goalsByMinute, quintetBalance, goalsByPhase } from "./analisis.js";
+import { buildSeasonReportHtml } from "./memoriaHtml.js";
 import { buildBackup, summarizeBackup, fmtBytes, backupFileName, shareOrDownload, readBackupFile, applyBackup } from "./backup.js";
 
 /* TOKENS — colores del escudo real del Noia Portus Apostoli FS:
@@ -1960,6 +1962,19 @@ export default function App() {
   const [cropTarget, setCropTarget] = useState(null); // { kind: 'player'|'teamCrest'|'rivalCrest', id, src }
   const [pendingDrafts, setPendingDrafts] = useState(null); // { match?, training? } sesiones sin cerrar encontradas al abrir
   const [backupOpen, setBackupOpen] = useState(false);
+  // Cuándo se hizo la última copia de seguridad (para el aviso de Inicio). No
+  // viaja dentro de la propia copia: es una marca de ESTE dispositivo.
+  const [lastBackupAt, setLastBackupAt] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    storage.get("lastBackupAt").then((r) => { if (alive && r && typeof r.value === "string") setLastBackupAt(r.value); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const markBackupDone = () => {
+    const iso = new Date().toISOString();
+    setLastBackupAt(iso);
+    storage.set("lastBackupAt", iso).catch(() => {});
+  };
   const [confirmRemovePlayer, setConfirmRemovePlayer] = useState(null); // jugador a punto de quitarse de la plantilla
   const [confirmRemoveTeam, setConfirmRemoveTeam] = useState(null); // equipo a punto de borrarse con todos sus datos
   const [installPrompt, setInstallPrompt] = useState(null);
@@ -3325,7 +3340,7 @@ export default function App() {
       const found = await storage.list(prefix);
       for (const key of (found && found.keys) || []) await storage.del(key);
     }
-    for (const key of [`roster:${id}`, matchDraftKey(id), trainingDraftKey(id)]) await storage.del(key);
+    for (const key of [`roster:${id}`, `seasonnote:${id}`, matchDraftKey(id), trainingDraftKey(id)]) await storage.del(key);
   };
 
   const removeTeamAction = async (id) => {
@@ -3579,6 +3594,8 @@ export default function App() {
             matchInProgress={matchInProgress}
             onResumeMatch={() => setView("partido")}
             onOpenBackup={() => setBackupOpen(true)}
+            lastBackupAt={lastBackupAt}
+            onForceUpdate={() => window.dispatchEvent(new CustomEvent("npa:force-update"))}
           />
         )}
 
@@ -3756,6 +3773,7 @@ export default function App() {
 
       {backupOpen && (
         <BackupModal
+          onExported={markBackupDone}
           onClose={() => setBackupOpen(false)}
           showToast={showToast}
           clockBusy={running || trainingRunning}
@@ -3997,7 +4015,7 @@ export default function App() {
 /* Copia de seguridad: pasar los datos a otra tablet o recuperarlos.
    Importar es destructivo, asi que nunca se aplica nada sin ver antes qué trae
    la copia y elegir explícitamente cómo entra. */
-function BackupModal({ onClose, showToast, clockBusy, matchInProgress, onBeforeExport }) {
+function BackupModal({ onClose, showToast, clockBusy, matchInProgress, onBeforeExport, onExported }) {
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(null); // copia leída, esperando confirmación
   const [error, setError] = useState(null);
@@ -4012,6 +4030,7 @@ function BackupModal({ onClose, showToast, clockBusy, matchInProgress, onBeforeE
       if (!resumen.equipos.length) { setError("No hay nada que copiar todavía."); return; }
       const res = await shareOrDownload(JSON.stringify(backup), backupFileName());
       if (res === "cancelado") return;
+      if (onExported) onExported();
       showToast(res === "compartido" ? "Copia compartida" : "Copia guardada en Descargas");
     } catch (e) {
       setError("No se pudo crear la copia: " + (e && e.message ? e.message : "error desconocido"));
@@ -5056,7 +5075,12 @@ function HomeView({
   team, onPickCrest, onReframeCrest, onRemoveCrest, matches, trainings, onNewMatch, onNewTraining,
   onGoRoster, onGoHistory, onExport, playerCount, onOpenTeams, teamCount,
   canInstall, onInstall, standalone, updateReady, onApplyUpdate, onCheckUpdate, matchInProgress, onResumeMatch, onOpenBackup,
+  lastBackupAt, onForceUpdate,
 }) {
+  const [confirmForce, setConfirmForce] = useState(false);
+  // Aviso de copia de seguridad: los datos solo viven en este dispositivo.
+  const backupDays = lastBackupAt ? Math.floor((Date.now() - new Date(lastBackupAt).getTime()) / 86400000) : null;
+  const backupStale = backupDays === null || backupDays >= 7;
   const wins = matches.filter((m) => m.teamGoals > m.rivalScore).length;
   const draws = matches.filter((m) => m.teamGoals === m.rivalScore).length;
   const losses = matches.filter((m) => m.teamGoals < m.rivalScore).length;
@@ -5143,6 +5167,34 @@ function HomeView({
           </button>
         )}
       </div>
+
+      {/* Si la versión nueva no llega por el camino normal, esto descarga la app
+          de cero. No borra los datos (equipos, partidos, plantilla). */}
+      <div style={{ maxWidth: 760, margin: "8px auto 0", textAlign: "center", fontSize: 11, color: T.dim }}>
+        {!confirmForce ? (
+          <button onClick={() => setConfirmForce(true)} style={{ background: "none", border: "none", color: T.dim, textDecoration: "underline", cursor: "pointer", fontSize: 11 }}>¿No se actualiza? Forzar actualización</button>
+        ) : matchInProgress ? (
+          <span>Hay un partido en curso: termínalo (o ponlo en pausa y guárdalo) antes de forzar la actualización. <button onClick={() => setConfirmForce(false)} style={{ ...ghostBtn, display: "inline-flex", fontSize: 11, padding: "4px 10px", marginLeft: 6 }}>Vale</button></span>
+        ) : (
+          <span>
+            Se vuelve a descargar la app (hace falta conexión). <strong style={{ color: T.text }}>Tus datos no se borran.</strong>{" "}
+            <button onClick={() => { if (navigator.onLine === false) { setConfirmForce(false); return; } onForceUpdate(); }} style={{ ...ghostBtn, display: "inline-flex", fontSize: 11, padding: "4px 10px", marginLeft: 6, borderColor: T.red, color: T.red }}>{navigator.onLine === false ? "Sin conexión" : "Forzar ahora"}</button>
+            <button onClick={() => setConfirmForce(false)} style={{ ...ghostBtn, display: "inline-flex", fontSize: 11, padding: "4px 10px", marginLeft: 6 }}>Cancelar</button>
+          </span>
+        )}
+      </div>
+
+      {matches.length > 0 && (
+        <div style={{ maxWidth: 760, margin: "14px auto 0", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap", fontSize: 12, color: backupStale ? T.amber : T.dim, background: backupStale ? "rgba(227,178,60,0.12)" : "transparent", border: backupStale ? `1px solid ${T.amber}` : "none", borderRadius: 10, padding: backupStale ? "8px 12px" : 0 }}>
+          <span>
+            {backupDays === null ? "Todavía no hay copia de seguridad de estos datos."
+              : backupDays === 0 ? "Última copia de seguridad: hoy."
+              : `Última copia de seguridad: hace ${backupDays} día${backupDays === 1 ? "" : "s"}.`}
+            {backupStale && " Los datos solo viven en este dispositivo."}
+          </span>
+          {backupStale && <button onClick={onOpenBackup} style={{ ...ghostBtn, fontSize: 12, padding: "6px 12px", borderColor: T.amber, color: T.amber }}><DatabaseBackup size={13} /> Hacer copia ahora</button>}
+        </div>
+      )}
 
       {matches.length > 0 && (
         <div style={{ maxWidth: 760, margin: "26px auto 0" }}>
@@ -5506,6 +5558,7 @@ function HistoryView({ matches, trainings, teamId, teamName, teamCrest, rosterPl
         <SubTabBtn active={subTab === "estadisticas"} onClick={() => onSubTabChange("estadisticas")} label="Fases de gol" />
         <SubTabBtn active={subTab === "zonas"} onClick={() => onSubTabChange("zonas")} label="Zonas" />
         <SubTabBtn active={subTab === "jugadores"} onClick={() => onSubTabChange("jugadores")} label="Jugadores" />
+        <SubTabBtn active={subTab === "analisis"} onClick={() => onSubTabChange("analisis")} label="Análisis" />
       </div>
 
       {subTab === "partidos" && (
@@ -5582,6 +5635,8 @@ function HistoryView({ matches, trainings, teamId, teamName, teamCrest, rosterPl
       {subTab === "zonas" && <SeasonZonesView matches={matches} teamName={teamName} />}
 
       {subTab === "jugadores" && <SeasonPlayersView matches={matches} teamId={teamId} teamName={teamName} />}
+
+      {subTab === "analisis" && <SeasonAnalysisView matches={matches} teamId={teamId} teamName={teamName} />}
     </div>
   );
 }
@@ -5784,6 +5839,88 @@ function SeasonGoalStatsView({ matches, teamName, onRowClick }) {
    (pantalla + PDF + CSV). La logica vive en jugadores.js y el HTML de la ficha
    en fichaHtml.js, los dos probados; aqui solo hay pantalla. La ficha que se ve
    es el mismo HTML que se vuelca al PDF. */
+/* Análisis de temporada: la memoria (resultados, fases, goles por minuto,
+   jugadores y quintetos) del periodo elegido. Lo que se ve es el mismo HTML que
+   se vuelca al PDF. La lógica vive en analisis.js y el HTML en memoriaHtml.js. */
+function SeasonAnalysisView({ matches, teamId, teamName }) {
+  const [periodValue, setPeriodValue] = useState("all");
+  const [notes, setNotes] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+  const notesRef = useRef({ text: "", dirty: false });
+  const timerRef = useRef(null);
+  const noteKey = teamId ? `seasonnote:${teamId}` : null;
+
+  const period = useMemo(() => periodFromValue(periodValue), [periodValue]);
+  const periodLabel = periodLabelOf(periodValue, matches);
+  const chosen = useMemo(() => selectMatches(matches, period), [matches, period]);
+  const sortedMatches = useMemo(() => [...matches].sort((a, b) => new Date(b.date) - new Date(a.date)), [matches]);
+
+  const flushNotes = () => {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    if (!notesRef.current.dirty || !noteKey) return;
+    notesRef.current.dirty = false;
+    if (notesRef.current.text.trim()) storage.set(noteKey, notesRef.current.text); else storage.del(noteKey);
+  };
+  useEffect(() => {
+    notesRef.current = { text: "", dirty: false };
+    setNotes("");
+    if (!noteKey) return undefined;
+    let alive = true;
+    storage.get(noteKey).then((r) => { if (alive && r && typeof r.value === "string") { notesRef.current.text = r.value; setNotes(r.value); } });
+    return () => { alive = false; flushNotes(); };
+  }, [noteKey]);
+  const onNotes = (text) => {
+    setNotes(text);
+    notesRef.current = { text, dirty: true };
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(flushNotes, 800);
+  };
+
+  const html = useMemo(() => buildSeasonReportHtml({
+    teamName, periodLabel, summary: seasonSummary(chosen), minutes: goalsByMinute(chosen), quintets: quintetBalance(chosen),
+    phases: goalsByPhase(chosen), phaseOrder: GOAL_PHASES, playersTable: seasonTable(matches, period), notes,
+  }), [chosen, matches, period, teamName, periodLabel, notes]);
+
+  const exportPdf = async () => {
+    if (exporting) return;
+    setExporting(true); setExportError("");
+    try { await exportReportToPdf(html, `${sanitizeFileName(teamName) || "equipo"}_memoria_${new Date().toISOString().slice(0, 10)}.pdf`); }
+    catch (e) { setExportError("No se pudo generar el PDF. Prueba otra vez."); }
+    setExporting(false);
+  };
+
+  if (!matches.length) {
+    return <div style={{ padding: 20, textAlign: "center", color: T.dim, fontSize: 13, border: `1px dashed ${T.line}`, borderRadius: 12 }}>Todavía no hay partidos guardados para analizar.</div>;
+  }
+  const labelStyle = { fontSize: 10, fontWeight: 700, color: T.dim, textTransform: "uppercase", letterSpacing: 0.4, display: "block", marginBottom: 4 };
+  const selectStyle = { background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, color: T.text, padding: "8px 10px", width: "100%" };
+  return (
+    <div className="fadein">
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 }}>
+        <label style={{ flex: "1 1 220px" }}><span style={labelStyle}>Periodo</span>
+          <select value={periodValue} onChange={(e) => setPeriodValue(e.target.value)} style={selectStyle}>
+            <option value="all">Toda la temporada ({matches.length})</option>
+            {matches.length > 3 && <option value="last3">Últimos 3 partidos</option>}
+            {matches.length > 5 && <option value="last5">Últimos 5 partidos</option>}
+            {sortedMatches.map((m) => <option key={m.date} value={`m:${m.date}`}>{new Date(m.date).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" })} vs {m.rivalName || "Rival"}</option>)}
+          </select>
+        </label>
+        <button onClick={exportPdf} disabled={exporting} style={{ ...ghostBtn, borderColor: T.red, color: T.red, fontWeight: 700, opacity: exporting ? 0.6 : 1 }}><Download size={14} /> {exporting ? "Generando…" : "Descargar memoria (PDF)"}</button>
+      </div>
+      {exportError && <div style={{ color: T.negative, fontSize: 12, marginBottom: 10 }}>{exportError}</div>}
+      <div style={{ overflowX: "auto", borderRadius: 12 }}>
+        <div dangerouslySetInnerHTML={{ __html: html }} />
+      </div>
+      <div style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 12, padding: 12, marginTop: 12 }}>
+        <label><span style={labelStyle}>Conclusiones del entrenador (salen en el PDF · se guardan solas)</span>
+          <textarea value={notes} onChange={(e) => onNotes(e.target.value)} onBlur={flushNotes} rows={4} maxLength={2000} placeholder="Balance de la fase, qué ha funcionado, objetivos para la siguiente…" style={{ ...selectStyle, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
+        </label>
+      </div>
+    </div>
+  );
+}
+
 function periodFromValue(v) {
   if (v === "all") return { mode: "all" };
   if (v.startsWith("last")) return { mode: "last", count: Number(v.slice(4)) };
