@@ -293,8 +293,9 @@ Con menos de 15 registros avisa de que es solo orientación.
   aviso deja meter al portero suplente (sale un jugador de pista) o poner de
   portero a uno de los que siguen en pista.
 - **Tiempos muertos**: botones «T.M. nuestro» y «T.M. rival»; paran el reloj y se
-  anotan con parte y minuto (se ven en la ficha del partido). No se bloquea por
-  cuántos lleve cada equipo porque el reglamento de cada competición varía.
+  anotan con parte y minuto (se ven en la ficha del partido). Cada equipo tiene
+  uno por parte: el botón queda como «usado» y no deja pedir otro (si te
+  equivocas, «Deshacer» lo libera). En la prórroga no se limita.
 - En pantallas de móvil (menos de 600 px) la pantalla de partido se compacta:
   cabecera más baja, jugadores en 2 columnas y barra inferior en una fila.
 

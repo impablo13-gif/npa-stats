@@ -2992,13 +2992,16 @@ export default function App() {
     loadHistoryFor(activeTeamId);
   };
 
-  // Tiempo muerto (1 minuto): para el reloj y se anota con parte y minuto. No
-  // se bloquea por cuántos lleve cada equipo: el reglamento de cada competición
-  // cambia (uno por parte, uno por partido...), así que solo se cuenta y se
-  // muestra cuántos van en la parte para que el cuerpo técnico decida.
+  // Tiempo muerto (1 minuto): para el reloj y se anota con parte y minuto.
+  // Reglamento de la competición: uno por equipo en cada parte. En la prórroga
+  // (partes 3+) no se limita porque no hay una norma confirmada.
   const registerTimeout = (team) => {
-    setClockRunning(false);
     const h = halfRef.current;
+    if (h <= 2 && timeouts.some((t) => t.team === team && t.half === h)) {
+      showToast(`${team === "for" ? "Nuestro" : "El rival"} ya usó el tiempo muerto de esta parte`);
+      return;
+    }
+    setClockRunning(false);
     const remainingNow = Math.max(0, halfMinutesFor(h, halfLenRef.current) * 60 - secondsRef.current);
     const ev = { id: `to-${Date.now()}`, team, half: h, remaining: remainingNow };
     const usedNow = timeouts.filter((t) => t.team === team && t.half === h).length + 1;
@@ -3519,9 +3522,10 @@ export default function App() {
               )}
               {view === "partido" && ["for", "against"].map((team) => {
                 const n = timeouts.filter((t) => t.team === team && t.half === half).length;
+                const used = half <= 2 && n >= 1;
                 return (
-                  <button key={team} onClick={() => registerTimeout(team)} title="Tiempo muerto: para el reloj y lo anota" style={{ ...ghostBtn, ...(n > 1 ? { borderColor: T.amber, color: T.amber } : {}) }}>
-                    ⏱ T.M. {team === "for" ? "nuestro" : "rival"}{n > 0 ? ` · ${n}` : ""}
+                  <button key={team} onClick={() => registerTimeout(team)} title={used ? "Ya usado en esta parte" : "Tiempo muerto: para el reloj y lo anota"} style={{ ...ghostBtn, ...(used ? { opacity: 0.5, textDecoration: "line-through" } : {}) }}>
+                    ⏱ T.M. {team === "for" ? "nuestro" : "rival"}{half > 2 && n > 0 ? ` · ${n}` : ""}{used ? " · usado" : ""}
                   </button>
                 );
               })}
