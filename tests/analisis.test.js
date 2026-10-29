@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { seasonSummary, goalsByMinute, quintetBalance, goalsByPhase, QUINTET_LOW_SAMPLE } from "../src/analisis.js";
+import { seasonSummary, goalsByMinute, quintetBalance, goalsByPhase, onCourtSegments, QUINTET_LOW_SAMPLE } from "../src/analisis.js";
 
 const on = (...ids) => ids.map((id, i) => ({ id, name: id.toUpperCase(), number: i + 1 }));
 const g = (type, half, remaining, onCourt = [], extra = {}) => ({ type, half, remaining, onCourt, phase: "ABP", ...extra });
@@ -60,7 +60,7 @@ test("sin partidos: ceros, sin NaN", () => {
   assert.equal(r.rows.length, 8);
   assert.deepEqual(r.total, { favor: 0, contra: 0 });
   assert.deepEqual(seasonSummary([]).results, []);
-  assert.deepEqual(quintetBalance([]), []);
+  assert.equal(quintetBalance([]).length, 0);
 });
 
 test("quintetos: el mismo grupo se une entre partidos", () => {
@@ -118,4 +118,67 @@ test("un tamaño no permitido vuelve al de 5 y los bordes de 5' no cambian con e
   assert.equal(goalsByMinute([m1], 7).bucketMin, 5);
   assert.deepEqual(goalsByMinute([m1], 10).first5, goalsByMinute([m1], 2).first5);
   assert.deepEqual(goalsByMinute([m1], 10).last5, goalsByMinute([m1], 2).last5);
+});
+
+// Partido con rotaciones: a,b,c,d toda la 1a parte; e los 10 primeros minutos y f los 10 ultimos.
+const rot = (playerId, half, startRemaining, endRemaining) => ({ playerId, half, startRemaining, endRemaining, playerName: playerId, playerNumber: 1 });
+const mt = {
+  date: "2026-10-15T18:00:00.000Z", rivalName: "Ferrol", teamGoals: 1, rivalScore: 1, halfLength: 20,
+  rotations: [...["a", "b", "c", "d"].map((id) => rot(id, 1, 1200, 0)), rot("e", 1, 1200, 600), rot("f", 1, 600, 0)],
+  goalEvents: [
+    g("for", 1, 1100, on("a", "b", "c", "d", "e")),
+    g("against", 1, 300, on("a", "b", "c", "d", "f")),
+  ],
+};
+
+test("segmentos: reparte la parte segun quien esta en pista en cada momento", () => {
+  const segs = onCourtSegments(mt);
+  assert.equal(segs.length, 2);
+  assert.deepEqual(segs.map((x) => [x.from, x.to, x.seconds, x.size]), [[0, 600, 600, 5], [600, 1200, 600, 5]]);
+  assert.equal(onCourtSegments({ goalEvents: [] }), null); // sin rotaciones
+  assert.equal(onCourtSegments({ rotations: [] }), null);
+});
+
+test("minutos por quinteto: suma los segmentos y calcula el +/- por 40'", () => {
+  const q = quintetBalance([mt]);
+  const abcde = q.find((x) => x.players.some((p) => p.key === "e"));
+  const abcdf = q.find((x) => x.players.some((p) => p.key === "f"));
+  assert.equal(abcde.seconds, 600);
+  assert.equal(abcdf.seconds, 600);
+  assert.deepEqual([abcde.favor, abcde.contra], [1, 0]);
+  assert.ok(Math.abs(abcde.per40 - 4) < 1e-9); // +1 en 10 min -> +4 por 40'
+  assert.ok(Math.abs(abcdf.per40 + 4) < 1e-9); // -1 en 10 min -> -4 por 40'
+  assert.equal(q.timedMatches, 1);
+  assert.equal(q.totalMatches, 1);
+});
+
+test("el ritmo usa solo goles de partidos con minutos, no los de partidos sin rotaciones", () => {
+  const q = quintetBalance([mt, m1]); // m1 no tiene rotaciones y mete 2 goles del mismo quinteto a-e
+  const abcde = q.find((x) => x.players.some((p) => p.key === "e") && x.players.length === 5);
+  assert.equal(abcde.favor, 3); // 1 de mt + 2 de m1
+  assert.equal(abcde.timedFavor, 1); // solo el de mt cuenta para el ritmo
+  assert.ok(Math.abs(abcde.per40 - 4) < 1e-9);
+  assert.equal(q.timedMatches, 1);
+  assert.equal(q.totalMatches, 2);
+});
+
+test("con menos de 5 minutos juntos no hay ritmo por 40'", () => {
+  const short = { halfLength: 20, goalEvents: [g("for", 1, 1100, on("a", "b", "c", "d", "e"))],
+    rotations: ["a", "b", "c", "d", "e"].map((id) => rot(id, 1, 1200, 1000)) }; // 200 s
+  const q = quintetBalance([short]);
+  assert.equal(q[0].seconds, 200);
+  assert.equal(q[0].per40, null);
+  assert.equal(q[0].lowSample, true);
+});
+
+test("rotaciones invalidas no rompen nada ni dan NaN", () => {
+  const bad = { halfLength: 20, goalEvents: [], rotations: [null, { playerId: null }, rot("a", 1, 100, 200), rot("b", 1, "x", 0)] };
+  assert.equal(onCourtSegments(bad).length, 0);
+  assert.equal(quintetBalance([bad]).length, 0);
+});
+
+test("segunda parte y prorroga usan su propia duracion", () => {
+  const m = { halfLength: 20, goalEvents: [], rotations: [rot("a", 2, 1200, 0), rot("a", 3, 180, 0)] };
+  const segs = onCourtSegments(m);
+  assert.deepEqual(segs.map((x) => [x.half, x.seconds]).sort(), [[2, 1200], [3, 180]]);
 });

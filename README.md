@@ -310,9 +310,14 @@ solas y salen en el PDF.
 - Los minutos de los goles son tiempo jugado dentro de cada parte; un gol sin
   minuto (partidos antiguos) se cuenta aparte y se avisa, y la prórroga no entra
   en los tramos.
-- El balance de un quinteto es de **goles** con esos cinco en pista al marcarse.
-  La app no guarda cuánto tiempo estuvo cada quinteto, así que no es un balance
-  por minuto; con menos de 3 goles se marca como «muestra pequeña».
+- **Quintetos**: los minutos de cada grupo de cinco salen de las rotaciones
+  guardadas en cada partido (quién entra y sale y en qué minuto del reloj de la
+  app, que se para en los parones: es juego efectivo). El balance cuenta goles con
+  esos cinco en pista al marcarse y el **+/- por 40'** usa solo los goles de los
+  partidos que tienen rotaciones, y solo si el quinteto suma 5 min o más. Los
+  partidos anteriores a registrar rotaciones aportan goles pero no minutos (la
+  memoria dice de cuántos partidos salen los minutos). Con menos de 3 goles o
+  menos de 10 minutos se marca como «muestra pequeña».
 
 ### Copia de seguridad y actualización
 

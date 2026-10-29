@@ -22,7 +22,7 @@ const html = (ms, o = {}) => buildSeasonReportHtml({
 
 test("la memoria incluye resumen, fases, minutos, jugadores y quintetos", () => {
   const h = html([mk("Lugo")]);
-  for (const t of ["Memoria", "Resultados", "Goles por fase", "Goles por minuto", "Jugadores con más minutos", "Quintetos con más goles"]) assert.ok(h.includes(t), t);
+  for (const t of ["Memoria", "Resultados", "Goles por fase", "Goles por minuto", "Jugadores con más minutos", "Quintetos más usados"]) assert.ok(h.includes(t), t);
   assert.ok((h.match(/data-pdf-block/g) || []).length >= 7);
 });
 
@@ -46,4 +46,15 @@ test("las conclusiones solo salen si las hay", () => {
 
 test("la muestra pequeña de un quinteto se avisa", () => {
   assert.ok(html([mk("Lugo")]).includes("muestra pequeña"));
+});
+
+test("quintetos: muestra minutos y +/- por 40' cuando hay rotaciones, y avisa cuando no", () => {
+  const rot = (playerId, startRemaining, endRemaining) => ({ playerId, half: 1, startRemaining, endRemaining, playerName: playerId, playerNumber: 1 });
+  const con = { ...mk("Lugo"), rotations: ["a", "b", "c", "d", "e"].map((id) => rot(id, 1200, 0)) };
+  const h = html([con]);
+  assert.ok(h.includes("20&#39;00") || h.includes("20'00"));
+  assert.ok(h.includes("rotaciones de 1 de 1 partido"));
+  assert.ok(!/NaN|undefined|Infinity/.test(h));
+  const sin = html([mk("Lugo")]);
+  assert.ok(sin.includes("Ningún partido del periodo guardó rotaciones"));
 });

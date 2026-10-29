@@ -20,7 +20,9 @@ const TD = `padding:6px 8px; text-align:right; font-size:12px; white-space:nowra
 const fmtDate = (iso) => new Date(iso).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "2-digit" });
 const signed = (v) => (v > 0 ? `+${v}` : String(v));
 const balColor = (v) => (v > 0 ? PAL.favor : v < 0 ? PAL.contra : PAL.dim);
-const OUTCOME_BG = { V: PAL.favor, E: "#9aa0a6", D: PAL.contra };
+const fmtMinSec = (s) => `${Math.floor(s / 60)}'${String(Math.round(s % 60)).padStart(2, "0")}"`;
+const signedDec = (v) => { const r = Math.round(v * 10) / 10; return `${r > 0 ? "+" : ""}${String(r).replace(".", ",")}`; };
+const OUTCOME_BG ={ V: PAL.favor, E: "#9aa0a6", D: PAL.contra };
 
 function tile(label, value, sub, color) {
   return `<div style="flex:1 1 130px; min-width:110px; border:1px solid ${PAL.line}; border-radius:10px; padding:10px 12px; background:${PAL.soft};">
@@ -82,10 +84,14 @@ export function buildSeasonReportHtml(opts) {
   const quintetRows = topQuintets.map((q, i) => `
     <tr style="border-top:1px solid ${PAL.line}; background:${i % 2 ? PAL.soft : "#fff"};">
       <td style="${TD} text-align:left; white-space:normal; font-size:11.5px; line-height:1.4;">${q.players.map((p) => `<span style="color:${PAL.red}; font-weight:800;">${esc(p.number)}</span> ${esc(p.name)}`).join(" · ")}${q.size < 5 ? ` <span style="color:${PAL.amber};">(${q.size} en pista)</span>` : ""}</td>
+      <td style="${TD}">${q.seconds > 0 ? esc(fmtMinSec(q.seconds)) : "—"}</td>
       <td style="${TD}">${q.favor}</td><td style="${TD}">${q.contra}</td>
       <td style="${TD} font-weight:800; color:${balColor(q.diff)};">${esc(signed(q.diff))}</td>
+      <td style="${TD} font-weight:800; color:${q.per40 === null || q.per40 === undefined ? PAL.dim : balColor(q.per40)};">${q.per40 === null || q.per40 === undefined ? "—" : esc(signedDec(q.per40))}</td>
       <td style="${TD} color:${PAL.amber}; font-size:10.5px;">${q.lowSample ? "muestra pequeña" : ""}</td>
     </tr>`).join("");
+  const timedMatches = Number(quintets.timedMatches) || 0;
+  const totalMatches = Number(quintets.totalMatches) || 0;
 
   return `
   <div style="font-family:Arial, Helvetica, sans-serif; color:${PAL.ink}; background:#fff; max-width:900px; width:100%; margin:0 auto; padding:18px; box-sizing:border-box;">
@@ -135,8 +141,13 @@ export function buildSeasonReportHtml(opts) {
     </div>
 
     <div data-pdf-block style="${CARD}">
-      <div style="${H}">Quintetos con más goles</div>
-      ${topQuintets.length ? `<table style="width:100%; border-collapse:collapse;"><tr style="color:${PAL.dim};"><th style="${TH} text-align:left;">Quinteto en pista al marcarse</th><th style="${TH}">A favor</th><th style="${TH}">En contra</th><th style="${TH}">+/-</th><th style="${TH}"></th></tr>${quintetRows}</table>` : `<div style="font-size:12px; color:${PAL.dim};">Sin goles con quinteto registrado.</div>`}
+      <div style="${H}">Quintetos más usados</div>
+      ${topQuintets.length ? `<table style="width:100%; border-collapse:collapse;"><tr style="color:${PAL.dim};"><th style="${TH} text-align:left;">Quinteto en pista</th><th style="${TH}">Min</th><th style="${TH}">A favor</th><th style="${TH}">En contra</th><th style="${TH}">+/-</th><th style="${TH}">+/- por ${RATE_BASE_MIN}'</th><th style="${TH}"></th></tr>${quintetRows}</table>` : `<div style="font-size:12px; color:${PAL.dim};">Sin quintetos registrados.</div>`}
+      <div style="font-size:10.5px; color:${PAL.dim}; margin-top:8px; line-height:1.5;">
+        ${timedMatches > 0
+    ? `Minutos de juego efectivo (el reloj de la app se para en los parones), calculados con las rotaciones de ${timedMatches} de ${totalMatches} partido${totalMatches === 1 ? "" : "s"}. El +/- por ${RATE_BASE_MIN}' usa solo los goles de esos partidos y solo se calcula con 5 min o más juntos.${timedMatches < totalMatches ? " Los partidos anteriores a registrar rotaciones no aportan minutos, solo sus goles." : ""}`
+    : "Ningún partido del periodo guardó rotaciones: solo hay goles, sin minutos ni ritmo por 40'."}
+      </div>
     </div>
 
     ${notes && notes.trim() ? `<div data-pdf-block style="${CARD}">
@@ -145,7 +156,7 @@ export function buildSeasonReportHtml(opts) {
     </div>` : ""}
 
     <div data-pdf-block style="font-size:10.5px; color:${PAL.dim}; line-height:1.5; padding:4px 2px 0;">
-      <strong>Cómo leerlo.</strong> Los minutos de los goles son tiempo jugado dentro de cada parte. El balance de un quinteto es de <em>goles</em> (a favor menos en contra) con esos cinco en pista al marcarse: la app no guarda cuánto tiempo estuvo cada quinteto, así que no es un balance por minuto y con pocos goles es anecdótico.
+      <strong>Cómo leerlo.</strong> Los minutos de los goles son tiempo jugado dentro de cada parte. Los minutos de un quinteto salen de las rotaciones guardadas; su balance cuenta goles con esos cinco en pista, y con pocos goles o pocos minutos es anecdótico.
       El +/- de un jugador es contexto, no mérito individual. Los ritmos por ${RATE_BASE_MIN} min están en la ficha de cada jugador. Los datos salen de lo anotado en los partidos; lo que no se anotó no se estima.
     </div>
   </div>`;
