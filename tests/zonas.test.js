@@ -86,3 +86,72 @@ test("el CSV lleva BOM, separador ; , comillas escapadas y mm:ss", () => {
   const quoted = eventsToCsv([{ matchDate: "2026-01-01T00:00:00.000Z", rival: 'Club "A"', half: 1, remaining: null, playerNumber: 1, playerName: "X", action: "goal", zone: "def-izq" }]);
   assert.ok(quoted.includes('"Club ""A"""'));
 });
+
+import { ZONES_FINE, ZONES_COARSE, ZONE_KEYS_FINE, ZONE_LABELS, toCoarseKey, isFineKey } from "../src/zonas.js";
+
+test("hay 18 zonas finas (6 filas x 3 carriles) y 9 gruesas, sin claves repetidas", () => {
+  assert.equal(ZONES_FINE.length, 18);
+  assert.equal(ZONES_COARSE.length, 9);
+  assert.equal(new Set(ZONE_KEYS_FINE).size, 18);
+  assert.deepEqual([...new Set(ZONES_FINE.map((z) => z.row))], [0, 1, 2, 3, 4, 5]);
+  assert.deepEqual([...new Set(ZONES_FINE.map((z) => z.col))], [0, 1, 2]);
+  [...ZONES_FINE, ...ZONES_COARSE].forEach((z) => assert.ok(ZONE_LABELS[z.key], `falta etiqueta de ${z.key}`));
+});
+
+test("cada zona fina cae en la gruesa que la contiene, conservando el carril", () => {
+  assert.equal(toCoarseKey("f1-izq"), "def-izq");
+  assert.equal(toCoarseKey("f2-der"), "def-der");
+  assert.equal(toCoarseKey("f3-centro"), "medio-centro");
+  assert.equal(toCoarseKey("f4-izq"), "medio-izq");
+  assert.equal(toCoarseKey("f5-der"), "ataque-der");
+  assert.equal(toCoarseKey("f6-centro"), "ataque-centro");
+  assert.equal(toCoarseKey("ataque-izq"), "ataque-izq"); // una gruesa se queda igual
+  assert.equal(toCoarseKey("inventada"), "inventada");
+  ZONES_FINE.forEach((z) => assert.ok(ZONES_COARSE.some((c) => c.key === toCoarseKey(z.key)), z.key));
+});
+
+const mixed = {
+  date: "2026-10-10T18:00:00.000Z", rivalName: "Mixto",
+  zonedEvents: [
+    { key: "shotsOn", zone: "f6-centro", playerId: "p1", playerName: "A", playerNumber: 1, half: 1, remaining: 100 },
+    { key: "shotsOn", zone: "f5-centro", playerId: "p1", playerName: "A", playerNumber: 1, half: 1, remaining: 90 },
+    { key: "shotsOn", zone: "ataque-centro", playerId: "p1", playerName: "A", playerNumber: 1, half: 2, remaining: 80 }, // antiguo, 3x3
+  ],
+};
+
+test("vista de 18 zonas: solo lo registrado en fino; lo antiguo se avisa como excluido", () => {
+  const { events } = collectZoneEvents([mixed]);
+  const c = countByZone(events, "fine");
+  assert.equal(c.total, 2);
+  assert.equal(c.excluded, 1);
+  assert.equal(c.counts["f6-centro"], 1);
+  assert.equal(c.counts["f5-centro"], 1);
+  assert.equal(Object.keys(c.counts).length, 18);
+  assert.ok(Math.abs(c.share["f6-centro"] - 0.5) < 1e-9);
+});
+
+test("vista de 9 zonas: junta lo fino con lo antiguo", () => {
+  const { events } = collectZoneEvents([mixed]);
+  const c = countByZone(events, "coarse");
+  assert.equal(c.total, 3);
+  assert.equal(c.excluded, 0);
+  assert.equal(c.counts["ataque-centro"], 3); // f6 + f5 + el 3x3 antiguo
+});
+
+test("18 zonas sin datos: ceros, sin NaN", () => {
+  const c = countByZone([], "fine");
+  assert.equal(c.total, 0);
+  assert.equal(c.max, 0);
+  ZONE_KEYS_FINE.forEach((k) => { assert.equal(c.share[k], 0); });
+});
+
+test("el CSV lleva la clave de zona y la resolucion con la que se registro", () => {
+  const { events } = collectZoneEvents([mixed]);
+  const lines = eventsToCsv(events).split("\r\n");
+  assert.ok(lines[0].endsWith('"zona";"zona_clave";"resolucion_zonas"'));
+  assert.ok(lines[1].includes('"Ataque derecha"') === false);
+  assert.ok(lines[1].includes('"Área rival centro";"f6-centro";"18 zonas"'));
+  assert.ok(lines[3].includes('"ataque-centro";"9 zonas"'));
+  assert.equal(isFineKey("f1-izq"), true);
+  assert.equal(isFineKey("def-izq"), false);
+});
