@@ -1847,6 +1847,26 @@ function EditableText({ value, onChange, onBlurCommit, className, style, placeho
 
 /* ==================================================================== */
 
+/* Primera vez (o sin equipos): no hay equipo predeterminado, hay que crearlo. */
+function FirstTeamScreen({ onCreate }) {
+  const [name, setName] = useState("");
+  const [subtitle, setSubtitle] = useState("");
+  const [busy, setBusy] = useState(false);
+  const ok = name.trim().length > 0 && !busy;
+  const input = { width: "100%", background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, color: T.text, padding: "10px 12px", fontSize: 15, boxSizing: "border-box" };
+  return (
+    <div style={{ background: T.bg, color: T.text, minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Inter, sans-serif", padding: 20 }}>
+      <form onSubmit={async (e) => { e.preventDefault(); if (!ok) return; setBusy(true); await onCreate(name.trim(), subtitle.trim()); }} style={{ width: "100%", maxWidth: 380, display: "grid", gap: 12 }}>
+        <div className="oswald" style={{ fontSize: 24, fontWeight: 600, letterSpacing: 0.5 }}>Crea tu primer equipo</div>
+        <div style={{ fontSize: 13, color: T.dim }}>Todavía no hay ningún equipo en este dispositivo. Ponle nombre para empezar; podrás añadir el escudo y la plantilla después.</div>
+        <label style={{ fontSize: 12, color: T.dim }}>Nombre del equipo<input autoFocus value={name} maxLength={60} onChange={(e) => setName(e.target.value)} style={{ ...input, marginTop: 4 }} /></label>
+        <label style={{ fontSize: 12, color: T.dim }}>Competición o categoría (opcional)<input value={subtitle} maxLength={60} onChange={(e) => setSubtitle(e.target.value)} style={{ ...input, marginTop: 4 }} /></label>
+        <button type="submit" disabled={!ok} style={{ background: ok ? T.red : T.surface3, color: "#fff", border: "none", borderRadius: 8, padding: "12px 14px", fontSize: 15, fontWeight: 600, cursor: ok ? "pointer" : "default" }}>Crear equipo</button>
+      </form>
+    </div>
+  );
+}
+
 const newTeam = (name) => ({ id: `team-${Date.now()}-${Math.floor(Math.random() * 1000)}`, name: name || "Nuevo equipo", subtitle: "", crest: null });
 
 const isStandaloneApp = () => {
@@ -2435,12 +2455,8 @@ export default function App() {
         if (t && t.value) { const parsed = JSON.parse(t.value); if (Array.isArray(parsed) && parsed.length) teamsList = parsed; }
       } catch (e) {}
 
-      if (!teamsList) {
-        const first = { ...newTeam("NPA PORTUS APOSTOLI"), subtitle: "JUVENIL DIVISIÓN DE HONOR" };
-        teamsList = [first];
-        await persistTeams(teamsList);
-        try { await storage.set(`roster:${first.id}`, JSON.stringify(defaultRoster())); } catch (e) {}
-      }
+      // Sin equipos guardados NO se crea ninguno: se muestra la pantalla «Crea tu primer equipo».
+      if (!teamsList) { setTeams([]); setActiveTeamId(null); setLoading(false); return; }
 
       let activeId = null;
       try {
@@ -3320,6 +3336,15 @@ export default function App() {
     autosaveSuspended.current = false;
   };
 
+  const createFirstTeam = async (name, subtitle) => {
+    const t = { ...newTeam(name), subtitle: subtitle || "" };
+    try { await storage.set(`roster:${t.id}`, JSON.stringify(defaultRoster())); } catch (e) {}
+    await persistTeams([t]);
+    setTeams([t]); setActiveTeamId(t.id);
+    try { await storage.set("activeTeamId", t.id); } catch (e) {}
+    await loadRosterFor(t.id); await loadHistoryFor(t.id); await loadTrainingHistoryFor(t.id); await checkDraftsFor(t.id);
+  };
+
   const addTeamAction = async () => {
     const t = newTeam("Nuevo equipo");
     const next = [...teams, t];
@@ -3391,6 +3416,8 @@ export default function App() {
   if (loading) {
     return <div style={{ background: T.bg, color: T.dim, minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Inter, sans-serif" }}>Cargando…</div>;
   }
+
+  if (teams.length === 0) return <FirstTeamScreen onCreate={createFirstTeam} />;
 
   return (
     <div style={{
