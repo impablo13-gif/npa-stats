@@ -112,12 +112,12 @@ export const QUINTET_LOW_SAMPLE_SECONDS = 10 * 60;
  *    que el ritmo sea honesto, el +/- por 40' usa SOLO los goles de esos mismos
  *    partidos (timedFavor/timedContra), nunca goles de partidos sin minutos.
  * Ordenado por minutos jugados y, a igualdad, por goles. */
-export function quintetBalance(matches, { minSeconds = 3 * 60 } = {}) {
+export function quintetBalance(matches) {
   const map = new Map();
   const get = (key, size, players) => {
     if (!map.has(key)) {
       map.set(key, {
-        key, size, favor: 0, contra: 0, seconds: 0, intervals: 0, timedFavor: 0, timedContra: 0,
+        key, size, favor: 0, contra: 0, seconds: 0, timedFavor: 0, timedContra: 0,
         players: players.map((p) => ({ key: p.key, name: p.name, number: p.number })).sort((a, b) => (Number(a.number) || 999) - (Number(b.number) || 999)),
       });
     }
@@ -127,16 +127,7 @@ export function quintetBalance(matches, { minSeconds = 3 * 60 } = {}) {
   (matches || []).forEach((m) => {
     const segs = onCourtSegments(m);
     if (segs && segs.length) timedMatches += 1;
-    // Un "intervalo" es una vez seguida en pista: tramos contiguos del mismo
-    // grupo (p. ej. cortados por la rotacion de alguien que no cambia el quinteto) cuentan como uno.
-    const last = new Map();
-    (segs || []).forEach((sg) => {
-      const q = get(sg.key, sg.size, sg.players);
-      q.seconds += sg.seconds;
-      const prev = last.get(sg.key);
-      if (!(prev && prev.half === sg.half && prev.to === sg.from)) q.intervals += 1;
-      last.set(sg.key, sg);
-    });
+    (segs || []).forEach((sg) => { get(sg.key, sg.size, sg.players).seconds += sg.seconds; });
     (m.goalEvents || []).forEach((ev) => {
       const oc = ev.onCourt || [];
       if (!oc.length || (ev.type !== "for" && ev.type !== "against")) return;
@@ -154,7 +145,7 @@ export function quintetBalance(matches, { minSeconds = 3 * 60 } = {}) {
       per40: rateOk ? ((q.timedFavor - q.timedContra) * 40 * 60) / q.seconds : null,
       lowSample: goals < QUINTET_LOW_SAMPLE || (q.seconds > 0 && q.seconds < QUINTET_LOW_SAMPLE_SECONDS),
     };
-  }).filter((q) => q.goals > 0 || q.seconds >= minSeconds); // un quinteto sin goles solo interesa si jugo un rato
+  }).filter((q) => q.goals > 0 || q.seconds >= 3 * 60); // un quinteto sin goles solo interesa si jugo un rato
   list.sort((a, b) => b.seconds - a.seconds || b.goals - a.goals || b.diff - a.diff);
   list.timedMatches = timedMatches;
   list.totalMatches = (matches || []).length;

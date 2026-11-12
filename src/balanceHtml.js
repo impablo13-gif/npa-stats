@@ -1,4 +1,4 @@
-/* HTML del balance mas/menos y de los quintetos de UN partido (pantalla + PDF).
+/* HTML del balance mas/menos de UN partido (pantalla + PDF).
  *
  * Funciones puras que devuelven strings con tablas y cajas (sin SVG ni canvas,
  * que html2canvas descarta en paginas largas). Cada fila lleva data-pdf-block:
@@ -7,7 +7,6 @@
  */
 
 import { matchBalance, sortBalance, verifyBalance, balanceGoalDetail, balanceSummary } from "./balancePartido.js";
-import { quintetBalance, onCourtSegments, QUINTET_RATE_MIN_SECONDS, QUINTET_LOW_SAMPLE_SECONDS } from "./analisis.js";
 
 const esc = (v) => String(v === undefined || v === null ? "" : v)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -116,37 +115,4 @@ export function buildBalanceBody(match, { sortBy = "balance" } = {}) {
     </div>
     ${verify}
     ${detail}`;
-}
-
-/* Cuerpo de la seccion "Quintetos del partido". */
-export function buildQuintetsBody(match) {
-  const segs = onCourtSegments(match);
-  if (!segs || !segs.length) {
-    return `<div style="font-size:11px; color:${PAL.dim};">Este partido no guardó rotaciones, así que no se pueden calcular los minutos de cada quinteto.</div>`;
-  }
-  const list = quintetBalance([match], { minSeconds: 60 }).filter((q) => q.seconds > 0);
-  if (!list.length) return `<div style="font-size:11px; color:${PAL.dim};">No hay quintetos con tiempo suficiente.</div>`;
-  const members = (q) => q.players.map((p) => `<span style="color:${PAL.dim}; font-weight:600;">${esc(p.number)}</span> ${esc(String(p.name || "").split(" ")[0])}`).join(" · ");
-  const rows = list.map((q) => {
-    const per40 = q.per40 === null ? `<span style="color:#c4c8cd;">—</span>` : `<span style="color:${q.per40 > 0 ? PAL.favor : q.per40 < 0 ? PAL.contra : PAL.dim}; font-weight:700;">${esc(fmtDec(q.per40))}</span>`;
-    return `<tr data-pdf-block="true" style="border-top:1px solid ${PAL.line};">
-      <td style="${TD} text-align:left; white-space:normal; line-height:1.5;">${members(q)}${q.size !== 5 ? ` <span style="font-size:9px; color:${PAL.amber};">(${q.size} jugadores)</span>` : ""}${q.lowSample ? ` <span style="font-size:9px; color:${PAL.dim};">muestra pequeña</span>` : ""}</td>
-      <td style="${TD} font-weight:700;">${esc(fmtMin(q.seconds))}</td>
-      <td style="${TD}">${q.intervals}</td>
-      <td style="${TD} color:${PAL.favor};">${q.timedFavor}</td>
-      <td style="${TD} color:${PAL.contra};">${q.timedContra}</td>
-      <td style="${TD} font-weight:800; color:${q.timedFavor - q.timedContra > 0 ? PAL.favor : q.timedFavor - q.timedContra < 0 ? PAL.contra : PAL.ink};">${esc(signed(q.timedFavor - q.timedContra))}</td>
-      <td style="${TD}">${per40}</td>
-    </tr>`;
-  }).join("");
-  return `
-    <table style="${TABLE}">
-      <thead><tr data-pdf-block="true">
-        <th style="${TH} text-align:left;">Quinteto</th><th style="${TH}">Min</th><th style="${TH}">Veces</th><th style="${TH}">GF</th><th style="${TH}">GC</th><th style="${TH}">+/-</th><th style="${TH}">+/- por 40'</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div style="margin-top:8px; font-size:9.5px; color:${PAL.dim}; line-height:1.5;">
-      Un quinteto es el grupo exacto de jugadores en pista, sin importar el orden. Los minutos son tiempo de juego (el reloj de la app se para en los parones) y "Veces" es cuántas veces seguidas estuvo en pista. El +/- por 40' solo se calcula con ${QUINTET_RATE_MIN_SECONDS / 60} min o más juntos; con menos de ${QUINTET_LOW_SAMPLE_SECONDS / 60} min o pocos goles es anecdótico. Solo se muestran quintetos con al menos 1 min.
-    </div>`;
 }

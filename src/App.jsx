@@ -10,7 +10,7 @@ import { storage, requestPersistence } from "./storage.js";
 import { ZONE_ACTIONS, ZONES_COARSE, ZONES_FINE, ZONE_LABELS, FINE_ROW_NAMES, toCoarseKey, isFineKey, collectZoneEvents, playersOf, filterEvents, countByZone, eventsToCsv } from "./zonas.js";
 import { selectMatches, seasonTable, playerReport, tableToCsv, seriesToCsv } from "./jugadores.js";
 import { buildPlayerReportHtml } from "./fichaHtml.js";
-import { buildBalanceBody, buildQuintetsBody } from "./balanceHtml.js";
+import { buildBalanceBody } from "./balanceHtml.js";
 import { seasonSummary, goalsByMinute, quintetBalance, goalsByPhase, BUCKET_OPTIONS } from "./analisis.js";
 import { buildSeasonReportHtml } from "./memoriaHtml.js";
 import { buildBackup, summarizeBackup, fmtBytes, backupFileName, shareOrDownload, readBackupFile, applyBackup } from "./backup.js";
@@ -1045,7 +1045,36 @@ function buildMatchReportHtml(rawMatch, teamName, rosterPlayers, teamCrest) {
       </svg>`;
   })();
 
-  /* ---- Más minutos juntos (el balance de cada jugador va en su propia sección) ---- */
+  /* ---- Presencia en pista: goles con cada uno dentro, y con quién más minutos junto ---- */
+  const onCourtGoalStats = new Map();
+  goals.forEach((ev) => {
+    (ev.onCourt || []).forEach((p) => {
+      const key = p.id || `${p.name}|${p.number}`;
+      if (!onCourtGoalStats.has(key)) onCourtGoalStats.set(key, { ...p, favor: 0, contra: 0 });
+      const d = onCourtGoalStats.get(key);
+      if (ev.type === "for") d.favor++; else d.contra++;
+    });
+  });
+  const presenceRows = [...onCourtGoalStats.values()].sort((a, b) => (b.favor + b.contra) - (a.favor + a.contra));
+  const maxPresenceSide = Math.max(1, ...presenceRows.map((r) => Math.max(r.favor, r.contra)));
+  // Barra divergente desde el centro -- roja hacia la izquierda (en contra),
+  // verde hacia la derecha (a favor), como un saldo visual de un vistazo.
+  const presenceHtml = !presenceRows.length ? `<div style="font-size:10px; color:#aaa;">Sin goles registrados.</div>` : presenceRows.map((r) => {
+    const net = r.favor - r.contra;
+    const leftPct = (r.contra / maxPresenceSide) * 100;
+    const rightPct = (r.favor / maxPresenceSide) * 100;
+    return `<div style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:10px;">
+        ${avatarImg(r, 22)}
+        <span style="width:66px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600;">${esc((r.name || "").split(" ")[0])}</span>
+        <span style="width:24px; text-align:right; font-size:10px; font-weight:800; color:${net >= 0 ? PAL.favor : PAL.contra};">${net > 0 ? `+${net}` : net}</span>
+        <div style="flex:1; display:flex; align-items:center; height:13px;">
+          <div style="flex:1; display:flex; justify-content:flex-end;"><div style="width:${leftPct}%; background:${PAL.contra}; height:100%; border-radius:3px 0 0 3px; display:flex; align-items:center; justify-content:flex-start; padding-left:3px;">${r.contra ? `<span style="font-size:8px; color:#fff; font-weight:700;">${r.contra}</span>` : ""}</div></div>
+          <div style="width:1px; height:100%; background:#d8dce0;"></div>
+          <div style="flex:1; display:flex; justify-content:flex-start;"><div style="width:${rightPct}%; background:${PAL.favor}; height:100%; border-radius:0 3px 3px 0; display:flex; align-items:center; justify-content:flex-end; padding-right:3px;">${r.favor ? `<span style="font-size:8px; color:#fff; font-weight:700;">${r.favor}</span>` : ""}</div></div>
+        </div>
+      </div>`;
+  }).join("");
+
   // Foto y nombre de cada combinación, con el mismo lenguaje visual que ya
   // usa el quinteto en pista de cada gol.
   const rowOf = (id) => {
@@ -1077,14 +1106,20 @@ function buildMatchReportHtml(rawMatch, teamName, rosterPlayers, teamCrest) {
       ${trios.length ? `<div style="font-size:9px; font-weight:700; color:#999; text-transform:uppercase; margin:6px 0 2px;">Tríos</div>${trios.map((r) => comboRow(r.combo, r.seconds)).join("")}` : ""}
       ${quartets.length ? `<div style="font-size:9px; font-weight:700; color:#999; text-transform:uppercase; margin:6px 0 2px;">Cuartetos</div>${quartets.map((r) => comboRow(r.combo, r.seconds)).join("")}` : ""}`;
 
-  const presenceSectionHtml = (!pairs.length && !trios.length && !quartets.length) ? "" : `${sectionTitle("👥", "Más minutos juntos")}
-    <div data-pdf-block="true" style="${CARD}">
-      ${pairingHtml}
+  const presenceSectionHtml = (!presenceRows.length && !pairs.length && !trios.length && !quartets.length) ? "" : `${sectionTitle("👥", "Presencia en pista")}
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+      <div data-pdf-block="true" style="${CARD}">
+        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; margin-bottom:8px;">Goles en pista <span style="color:${PAL.contra};">en contra</span> · <span style="color:${PAL.favor};">a favor</span></div>
+        ${presenceHtml}
+      </div>
+      <div data-pdf-block="true" style="${CARD}">
+        <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase;">Más minutos juntos</div>
+        ${pairingHtml}
+      </div>
     </div>`;
 
-  /* ---- Balance más/menos (todos los convocados) y quintetos del partido ---- */
+  /* ---- Balance más/menos de todos los convocados ---- */
   const balanceSectionHtml = `${sectionTitle("➕", "Balance más/menos")}${buildBalanceBody(match)}`;
-  const quintetsSectionHtml = `${sectionTitle("🧩", "Quintetos del partido")}${buildQuintetsBody(match)}`;
 
   /* ---- Campogramas: dónde pasó cada tiro, pérdida y recuperación. Estático
      a propósito (sin desplegable ni JavaScript): un jugador con varias
@@ -1426,9 +1461,8 @@ function buildMatchReportHtml(rawMatch, teamName, rosterPlayers, teamCrest) {
       ${minutesRankingHtml}
       ${goalsHtml}
       ${timelineHtml}
-      ${balanceSectionHtml}
-      ${quintetsSectionHtml}
       ${presenceSectionHtml}
+      ${balanceSectionHtml}
       ${shotsHtml}
       ${turnoverRecoverySectionHtml}
       ${sectionTitle("👤", "Fichas de jugadores")}

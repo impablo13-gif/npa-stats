@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { matchBalance, sortBalance, verifyBalance, balanceSummary, balanceGoalDetail } from "../src/balancePartido.js";
-import { quintetBalance } from "../src/analisis.js";
-import { buildBalanceBody, buildQuintetsBody } from "../src/balanceHtml.js";
+import { buildBalanceBody } from "../src/balanceHtml.js";
 
 /* Partido de referencia de 2 x 20', calculado a mano.
  *
@@ -118,18 +117,6 @@ test("convocado sin minutos pero con la foto de un gol no es NP", () => {
   assert.equal(byId(matchBalance(sinSeg), "e").status, "pos");
 });
 
-test("quintetos del partido: minutos, veces, goles y mismo grupo sin importar el orden", () => {
-  const q = quintetBalance([match], { minSeconds: 60 });
-  const find = (...ids) => q.find((x) => x.key === ids.sort().join("|"));
-  const q1 = find("a", "b", "c", "d", "e");
-  assert.deepEqual([q1.seconds, q1.intervals, q1.timedFavor, q1.timedContra], [600, 1, 2, 0]);
-  const q4 = find("a", "b", "c", "d", "g");
-  assert.deepEqual([q4.seconds, q4.timedFavor, q4.timedContra], [450, 1, 0]);
-  const q5 = find("a", "b", "c", "d", "i");
-  assert.deepEqual([q5.seconds, q5.timedFavor, q5.timedContra, q5.per40], [150, 0, 3, null]); // menos de 5 min: sin ritmo
-  assert.equal(q.length, 5); // 5 alineaciones distintas, ninguna duplicada
-});
-
 test("informe HTML: todos los convocados, 0 explicito, NP y texto escapado", () => {
   const raro = { ...match, players: players.map((p) => (p.id === "h" ? { ...p, name: "<b>Hugo</b>" } : p)), convocados: match.convocados.map((c) => (c.id === "h" ? { ...c, name: "<b>Hugo</b>" } : c)) };
   const html = buildBalanceBody(raro);
@@ -142,10 +129,4 @@ test("informe HTML: todos los convocados, 0 explicito, NP y texto escapado", () 
   assert.ok(html.includes("Comprobado: los 8 goles cuadran"));
   // el NP va despues de todos los que jugaron
   assert.ok(html.indexOf("Jugador I") < html.indexOf("&lt;b&gt;Hugo"));
-});
-
-test("informe HTML de quintetos: aviso si no hay rotaciones", () => {
-  assert.ok(buildQuintetsBody({ ...match, rotations: [] }).includes("no guardó rotaciones"));
-  const html = buildQuintetsBody(match);
-  assert.ok(html.includes("10'00&quot;") && html.includes("7'30&quot;")); // el " de los segundos va escapado
 });

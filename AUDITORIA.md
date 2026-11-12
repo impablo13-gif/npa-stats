@@ -25,7 +25,7 @@ jugadores en pista**), `rotations[]` (entrada/salida por jugador, parte y tiempo
 **El balance en pista del informe de partido omitía jugadores.** La tarjeta «Presencia en
 pista» se construía solo con quienes aparecían en la foto de algún gol. Un jugador con minutos
 pero sin gol con él en pista no salía, y no había minutos ni distinción de «no participó».
-Sustituido por la tabla completa de §3. *(Implementado y probado.)*
+Se añadió la tabla completa de §3; la tarjeta antigua se mantiene. *(Implementado y probado.)*
 
 ## 3. Balance más/menos (prioridad obligatoria)
 
@@ -40,10 +40,10 @@ en pista para poder revisarlo.
 **Verificación.** Se contrasta con una segunda fuente (las rotaciones) y con el marcador
 guardado; las discrepancias se avisan, no se corrigen en silencio.
 
-**Pruebas** (`tests/balance.test.js`, 11 pruebas): partido de referencia calculado a mano con
+**Pruebas** (`tests/balance.test.js`, 9 pruebas): partido de referencia calculado a mano con
 jugadores de +3, +1, 0, −1, −3 y un NP; comparación contra un cálculo independiente hecho solo
 desde las rotaciones; balance por parte; autogol; partido sin rotaciones; detección de goles
-sin foto, jugador fuera de rotación y marcador descuadrado; orden; escape de HTML; quintetos.
+sin foto, jugador fuera de rotación y marcador descuadrado; orden; escape de HTML.
 Además, comprobado en el navegador con ese mismo partido: las cifras del informe coinciden con
 las calculadas a mano. *(Implementado y probado.)*
 
@@ -60,13 +60,16 @@ las calculadas a mano. *(Implementado y probado.)*
 ## 4. Informe de partido: estado
 
 Orden actual: cabecera → minutos y rotaciones → top 5 de minutos → goles → cronología →
-**balance más/menos** → **quintetos del partido** → más minutos juntos → tiros →
-pérdidas/recuperaciones → fichas de jugador.
+presencia en pista (sin cambios) → **balance más/menos** → tiros → pérdidas/recuperaciones →
+fichas de jugador.
 
-*Implementado y probado:* balance, quintetos del partido (minutos, veces seguidas, GF, GC, +/-,
-+/- por 40' con mínimo de 5 min).
+Los quintetos del informe de partido (la tarjeta «Presencia en pista» y «Más minutos juntos»)
+se dejan **exactamente como estaban**: se probó una sección nueva de quintetos del partido y se
+retiró por indicación de Pablo.
 
-*Pendiente de validar:* **la exportación a PDF de las dos secciones nuevas** no se ha ejecutado
+*Implementado y probado:* balance más/menos.
+
+*Pendiente de validar:* **la exportación a PDF de la sección nueva de balance** no se ha ejecutado
 (cada fila lleva marca de corte de página y usa tablas simples, pero no se ha generado el PDF).
 
 *Propuesto, no hecho:* informe «resumido / individual / colectivo / por periodos» configurable;

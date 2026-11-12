@@ -91,7 +91,7 @@ Prueba la lógica pura con el ejecutor de pruebas de Node, sin dependencias
 nuevas: el mapa de zonas (`src/zonas.js`), los agregados por jugador
 (`src/jugadores.js`), el HTML de la ficha (`src/fichaHtml.js`, incluido que
 escape los textos), el análisis de temporada, la memoria y el balance más/menos
-con los quintetos de un partido (`src/balancePartido.js`). El despliegue a GitHub Pages ejecuta
+de un partido (`src/balancePartido.js`). El despliegue a GitHub Pages ejecuta
 `npm test` antes de compilar: si falla, no se publica.
 
 ### Iconos
@@ -391,9 +391,9 @@ vista sin tener que tocar nada —, goles según quién estaba en pista, quiéne
 coincidieron más tiempo juntos sin contar porteros (parejas, tríos y
 cuartetos, con foto y nombre de cada uno) y una ficha por jugador.
 
-#### Balance más/menos y quintetos del partido
+#### Balance más/menos del partido
 
-Entre la cronología y los tiros, el informe lleva dos secciones propias
+Tras «Presencia en pista», el informe lleva una sección propia
 (`src/balancePartido.js`, `src/balanceHtml.js`, con pruebas en
 `tests/balance.test.js`):
 
@@ -412,14 +412,10 @@ Entre la cronología y los tiros, el informe lleva dos secciones propias
   cubra el momento del gol) y con el marcador guardado. Si algo no cuadra, el
   informe lo avisa en un recuadro «Revisar» en vez de corregirlo en silencio. Debajo
   hay una tabla con cada gol y los dorsales en pista, para poder revisarlo.
-- **Quintetos del partido**: cada grupo exacto de jugadores en pista (da igual el
-  orden), con minutos de juego, veces seguidas en pista, goles a favor y en
-  contra, +/- y +/- por 40' (solo con 5 min o más juntos). Si el partido no guardó
-  rotaciones se dice y no se inventan minutos.
 
-Sustituye a la antigua tarjeta «goles en pista», que solo listaba a quien estaba
-en pista en algún gol (un jugador con minutos y sin goles no aparecía). «Más
-minutos juntos» se conserva.
+La tarjeta «Presencia en pista» (goles con cada uno en pista y más minutos juntos)
+se conserva tal cual: la tabla de balance la complementa, porque aquella solo
+listaba a quien estaba en pista en algún gol.
 
 Arriba hay dos formas de sacarlo: **Exportar a PDF** descarga el archivo
 directamente (en varias tablets, el diálogo de impresión no deja guardar
