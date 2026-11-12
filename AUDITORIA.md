@@ -12,7 +12,7 @@ No se da por correcto nada que no se haya ejecutado.
 | Corrección | Deshacer en cadena (goles, T.M., acciones), deshacer «Empezar 2ª parte», editar y borrar goles ya guardados | `src/App.jsx` |
 | Persistencia | IndexedDB, borrador automático, copia de seguridad JSON, aviso de copia, forzar actualización | `src/storage.js`, `src/backup.js` |
 | Informe de partido | HTML en pantalla = PDF (mismo HTML); ver §4 | `buildMatchReportHtml` en `src/App.jsx` |
-| Análisis de temporada | Goles por tramo (2/3/5/10 min), quintetos con minutos, fases, memoria en PDF | `src/analisis.js`, `src/memoriaHtml.js` |
+| Análisis de temporada | Goles por tramo (2/3/5/10 min), quintetos (balance de goles), fases, memoria en PDF | `src/analisis.js`, `src/memoriaHtml.js` |
 | Ficha de jugador | Tabla de plantilla, ficha individual, mapa de zonas, CSV, PDF, notas | `src/jugadores.js`, `src/fichaHtml.js`, `src/zonas.js` |
 
 Modelo de un partido guardado: `players[]` (con `seconds` y contadores), `goalEvents[]`
